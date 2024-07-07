@@ -51,7 +51,6 @@ int HevdTriggerBufferOverflowNonPagedPoolNx(HANDLE hHevd, char* overflow_data)
 
     if (!result)
     {
-
         fprintf(stderr, "[-] Failed to execute HEVD DeviceIoControl\n");
     }
 
