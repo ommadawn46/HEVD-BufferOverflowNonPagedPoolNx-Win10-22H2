@@ -1,0 +1,9 @@
+#ifndef CLEANUP_H
+#define CLEANUP_H
+
+#include "common.h"
+
+int CleanupPipes(exploit_pipes_t* pipes);
+int RestoreKernelState(exploit_addresses_t* addrs);
+
+#endif // CLEANUP_H
