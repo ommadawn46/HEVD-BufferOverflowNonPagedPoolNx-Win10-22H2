@@ -10,34 +10,34 @@ The exploit leverages [a buffer overflow vulnerability in the NonPagedPoolNx](ht
 
 Key steps in the exploit:
 
-1. Establish arbitrary read primitive:
-   - Create a "ghost chunk" by overflowing and manipulating the POOL_HEADER of an adjacent chunk.
-   - Use pipe queue entries to control the content of the ghost chunk in NonPagedPoolNx.
-   - Leverage the ghost chunk and pipe queue entries to create an arbitrary read primitive.
+1. [Establish arbitrary read primitive](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/4459a76/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/primitives/arbitrary_read.cpp#L163):
+   - Exploit HEVD's NonPagedPoolNx buffer overflow to corrupt an adjacent chunk's POOL_HEADER, creating a ["ghost chunk"](https://www.sstic.org/media/SSTIC2020/SSTIC-actes/pool_overflow_exploitation_since_windows_10_19h1/SSTIC2020-Slides-pool_overflow_exploitation_since_windows_10_19h1-bayet_fariello.pdf#page=43).
+   - Overwrite the previous chunk with a fake PipeQueueEntry, manipulating the ghost chunk's PipeQueueEntry structure.
+   - Set the manipulated linkedIRP to point to a user-mode fake PipeQuerySub structure.
+   - Set PipeQuerySub's data_ptr to the desired read address.
+   - Use PeekNamedPipe to trigger a read from the address specified in data_ptr.
 
-2. Leak kernel information:
+2. [Leak kernel information](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/4459a76/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/core/privilege_escalation.cpp#L14):
    - Use the arbitrary read primitive to obtain kernel base address, ExpPoolQuotaCookie, and other critical addresses.
    - Find the EPROCESS structure of the current process.
 
-3. Establish arbitrary decrement primitive:
-   - Create a fake EPROCESS structure in kernel land using a pipe queue entry.
+3. [Establish arbitrary decrement primitive](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/4459a76/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/primitives/arbitrary_decrement.cpp#L56):
+   - Create a fake EPROCESS structure in kernel land using a pipe attribute.
    - Manipulate the POOL_HEADER of the ghost chunk to set the PoolQuota bit.
    - Craft a fake ProcessBilled pointer in the POOL_HEADER, using the leaked ExpPoolQuotaCookie.
    - Trigger the free of the ghost chunk to cause an arbitrary decrement at a controlled address.
 
-4. Establish arbitrary write primitive:
+4. [Establish arbitrary write primitive](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/4459a76/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/primitives/arbitrary_write.cpp#L12):
    - Use the arbitrary decrement capability to manipulate the PreviousMode field of the current thread's KTHREAD structure.
    - This manipulation enables arbitrary write capabilities in kernel mode.
 
-5. Elevate privileges (data-only attack):
+5. [Elevate privileges (data-only attack)](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/4459a76/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/core/privilege_escalation.cpp#L157):
    - Use the arbitrary read primitive to locate the System process EPROCESS structure.
    - Use the arbitrary write primitive to copy the System process token to the current process's token.
 
-6. Restore kernel state:
-   - Fix manipulated structures to avoid crashes.
+6. [Restore kernel state](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/4459a76/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/core/cleanup.cpp#L74):
+   - Fix manipulated pool structures to avoid crashes.
    - Use the arbitrary write primitive to restore PreviousMode to its original value.
-
-This exploit demonstrates the power of chaining primitives: starting with a controlled buffer overflow, we establish an arbitrary read, then an arbitrary decrement, and finally an arbitrary write primitive. With full read/write capabilities, a data-only attack becomes possible, allowing for privilege escalation without executing any code in kernel mode.
 
 ## Tested Environment
 
