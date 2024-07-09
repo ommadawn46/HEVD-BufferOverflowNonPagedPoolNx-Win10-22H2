@@ -4,8 +4,8 @@
 #include "common.h"
 
 int SetPipeAttribute(pipe_pair_t* target_pipe, char* data, size_t size);
-int PeekDataFromPipe(pipe_pair_t* pipe_pair, char* out, size_t bufsize);
-int AllocNPPNxChunk(pipe_pair_t* pipe_pair, char* data, size_t bufsize);
+int PeekDataFromPipe(pipe_pair_t* pipe_pair, char* out, size_t);
+int AllocNPPNxChunk(pipe_pair_t* pipe, vs_chunk_t* chunk, size_t bufsize);
 int FreeNPPNxChunk(pipe_pair_t* pipe, size_t bufsize);
 int CreatePipePair(size_t bufsize, pipe_pair_t* pipe_pair);
 pipe_spray_t* CreatePipeSpray(size_t nb, size_t size, char* data);

