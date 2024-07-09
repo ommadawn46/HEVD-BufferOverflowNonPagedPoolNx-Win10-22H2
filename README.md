@@ -10,9 +10,9 @@ The exploit leverages [the BufferOverflowNonPagedPoolNx vulnerability](https://g
 
 Key techniques:
 
-1. Creation of a ghost chunk using Aligned Chunk Confusion in NonPagedPoolNx, enabling leakage and manipulation of [HEAP_VS_CHUNK_HEADER](https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_HEAP_VS_CHUNK_HEADER), [POOL_HEADER](https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_POOL_HEADER), and [PipeQueueEntry](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/4459a76/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/include/common.h#L67) structures via the previous chunk.
+1. Creation of a ghost chunk using Aligned Chunk Confusion in NonPagedPoolNx, enabling leakage and manipulation of [HEAP_VS_CHUNK_HEADER](https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_HEAP_VS_CHUNK_HEADER), [POOL_HEADER](https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_POOL_HEADER), and [PipeQueueEntry](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/9f626c7/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/include/common.h#L67) structures via the previous chunk.
 
-2. Establishment of an arbitrary read primitive by manipulating the PipeQueueEntry structure within the ghost chunk to set up a fake [PipeQueueEntrySub](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/4459a76/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/include/common.h#L79).
+2. Establishment of an arbitrary read primitive by manipulating the PipeQueueEntry structure within the ghost chunk to set up a fake [PipeQueueEntrySub](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/9f626c7/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/include/common.h#L79).
 
 3. Establishment of an arbitrary decrement primitive by altering the POOL_HEADER structure within the ghost chunk to set a fake ProcessBilled.
 
@@ -37,7 +37,7 @@ This exploit was tested in the following environment:
 
 ## Detailed Exploit Steps
 
-1. [Establish arbitrary read primitive](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/4459a76/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/primitives/arbitrary_read.cpp#L163):
+1. [Establish arbitrary read primitive](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/9f626c7/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/primitives/arbitrary_read.cpp#L169):
    - Exploit HEVD's NonPagedPoolNx buffer overflow to corrupt an adjacent chunk's POOL_HEADER, creating a ghost chunk:
      - Set CacheAligned bit and manipulate PreviousSize to control chunk positioning.
      - Upon freeing, this creates a ghost chunk overlapping with a previous chunk.
@@ -48,12 +48,12 @@ This exploit was tested in the following environment:
    - Set PipeQueryEntrySub's data_ptr to the desired read address.
    - Use PeekNamedPipe to trigger a read from the specified address.
 
-2. [Leak kernel information](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/4459a76/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/core/privilege_escalation.cpp#L14):
+2. [Leak kernel information](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/9f626c7/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/core/privilege_escalation.cpp#L14):
    - Use the arbitrary read primitive to obtain kernel base address, ExpPoolQuotaCookie, and other critical addresses.
    - Find the EPROCESS structure of the current process.
 
-3. [Establish arbitrary decrement primitive](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/4459a76/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/primitives/arbitrary_decrement.cpp#L56):
-   - Create a fake EPROCESS structure in kernel space using a [PipeAttribute](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/4459a76/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/include/common.h#L58).
+3. [Establish arbitrary decrement primitive](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/9f626c7/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/primitives/arbitrary_decrement.cpp#L57):
+   - Create a fake EPROCESS structure in kernel space using a [PipeAttribute](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/9f626c7/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/include/common.h#L58).
    - Manipulate the POOL_HEADER of the ghost chunk:
      - Set the PoolQuota bit to make the kernel interpret part of the header as a ProcessBilled pointer.
      - Set a fake ProcessBilled pointer, calculated as:
@@ -64,7 +64,7 @@ This exploit was tested in the following environment:
      - Subtract 0x100 (BlockSize) from the PoolQuota at (target address - 1).
      - Result in a 0x1 reduction at the target address.
 
-4. [Establish arbitrary write primitive](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/4459a76/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/primitives/arbitrary_write.cpp#L12):
+4. [Establish arbitrary write primitive](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/9f626c7/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/primitives/arbitrary_write.cpp#L12):
    - Use the arbitrary decrement primitive to manipulate the PreviousMode field of the current thread's KTHREAD structure.
      - Decrement PreviousMode from 1 (UserMode) to 0 (KernelMode).
    - This manipulation bypasses address validation in native system service routines like NtWriteVirtualMemory:
@@ -72,11 +72,11 @@ This exploit was tested in the following environment:
      - With PreviousMode set to KernelMode, these checks are skipped.
    - As a result, the exploit gains the ability to write to arbitrary kernel memory addresses, establishing an arbitrary write primitive.
 
-5. [Elevate privileges (data-only attack)](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/4459a76/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/core/privilege_escalation.cpp#L157):
+5. [Elevate privileges (data-only attack)](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/9f626c7/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/core/privilege_escalation.cpp#L157):
    - Use the arbitrary read primitive to locate the System process EPROCESS structure.
    - Use the arbitrary write primitive to copy the System process token to the current process's token.
 
-6. [Restore kernel state](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/4459a76/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/core/cleanup.cpp#L74):
+6. [Restore kernel state](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/9f626c7/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/core/cleanup.cpp#L11):
    - Repair the HEAP_VS_CHUNK_HEADER structures of the ghost chunk and adjacent chunks:
      - Leak RtlpHpHeapGlobals from kernel space using the arbitrary read primitive
      - Decode and re-encode headers using:
