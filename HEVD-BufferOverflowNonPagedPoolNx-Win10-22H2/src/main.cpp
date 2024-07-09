@@ -34,7 +34,7 @@ int main()
     }
 
     puts("\n# 3. Restoring kernel state\n");
-    if (!RestoreKernelState(&addrs))
+    if (!RestorePreviousMode(&addrs))
     {
         fprintf(stderr, "[-] Failed to restore kernel state\n");
         return 1;

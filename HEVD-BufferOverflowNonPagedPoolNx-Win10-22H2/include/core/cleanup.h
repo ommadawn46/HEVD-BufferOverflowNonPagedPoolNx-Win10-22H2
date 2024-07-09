@@ -4,6 +4,7 @@
 #include "common.h"
 
 int CleanupPipes(exploit_pipes_t* pipes);
-int RestoreKernelState(exploit_addresses_t* addrs);
+int RestorePreviousMode(exploit_addresses_t* addrs);
+int FixVsChunks(exploit_addresses_t* addrs);
 
 #endif // CLEANUP_H
