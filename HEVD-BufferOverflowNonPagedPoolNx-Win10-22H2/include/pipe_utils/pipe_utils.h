@@ -6,7 +6,7 @@
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
-int SetPipeAttribute(pipe_pair_t* target_pipe, const char* data, size_t size);
+int WriteDataToPipe(const pipe_pair_t* pipe_pair, const char* data, size_t bufsize);
 int PeekDataFromPipe(const pipe_pair_t* pipe_pair, char* out, size_t bufsize);
 pipe_pair_t AllocNPPNxChunk(const vs_chunk_t* chunk, size_t block_size);
 pipe_group_t* CreatePipeGroup(size_t nb, size_t block_size);

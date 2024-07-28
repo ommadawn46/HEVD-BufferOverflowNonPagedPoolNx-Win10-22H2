@@ -53,7 +53,7 @@ This exploit was tested in the following environment:
    - Find the EPROCESS structure of the current process.
 
 3. [Establish arbitrary decrement primitive](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/63916ff/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/primitives/arbitrary_decrement.cpp#L56):
-   - Create a fake EPROCESS structure in kernel space using a [PipeAttribute](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/63916ff/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/include/common.h#L58).
+   - Create a fake EPROCESS structure in kernel space.
    - Manipulate the POOL_HEADER of the ghost chunk:
      - Set the PoolQuota bit to make the kernel interpret part of the header as a ProcessBilled pointer.
      - Set a fake ProcessBilled pointer, calculated as:

