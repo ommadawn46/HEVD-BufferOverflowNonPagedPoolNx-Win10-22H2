@@ -19,7 +19,6 @@
 #define nt_ExAllocatePoolWithTag_OFFSET 0x9B7010
 #define nt_ExpPoolQuotaCookie_OFFSET 0xCFC9E8
 #define nt_RtlpHpHeapGlobals_OFFSET 0xC1DD00
-#define Npfs_NpFsdCreate_OFFSET 0xB540
 #define Npfs_imp_ExAllocatePoolWithTag_OFFSET 0x7050
 
 // Pipe structure offsets

