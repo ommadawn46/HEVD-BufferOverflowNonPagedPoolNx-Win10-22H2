@@ -153,7 +153,6 @@ int FreeNPPNxChunk(pipe_pair_t pipe, size_t block_size)
         return 0;
     }
 
-    g_pipe_pool.push_back(pipe);
     return 1;
 }
 
