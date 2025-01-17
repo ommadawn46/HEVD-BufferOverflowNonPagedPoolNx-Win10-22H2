@@ -10,9 +10,9 @@ The exploit leverages [the BufferOverflowNonPagedPoolNx vulnerability](https://g
 
 Key techniques:
 
-1. Creation of a ghost chunk using Aligned Chunk Confusion in NonPagedPoolNx, enabling leakage and manipulation of [HEAP_VS_CHUNK_HEADER](https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_HEAP_VS_CHUNK_HEADER), [POOL_HEADER](https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_POOL_HEADER), and [PipeQueueEntry](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/620eeac/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/include/common.h#L68) structures via the previous chunk.
+1. Creation of a ghost chunk using Aligned Chunk Confusion in NonPagedPoolNx, enabling leakage and manipulation of [HEAP_VS_CHUNK_HEADER](https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_HEAP_VS_CHUNK_HEADER), [POOL_HEADER](https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_POOL_HEADER), and [NP_DATA_QUEUE_ENTRY](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/620eeac/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/include/common.h#L68) structures via the previous chunk.
 
-2. Establishment of an arbitrary read primitive by manipulating the PipeQueueEntry structure within the ghost chunk to set up a fake [IRP](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/620eeac/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/include/common.h#L81).
+2. Establishment of an arbitrary read primitive by manipulating the NP_DATA_QUEUE_ENTRY structure within the ghost chunk to set up a fake [IRP](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/620eeac/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/include/common.h#L81).
 
 3. Establishment of an arbitrary decrement primitive by altering the POOL_HEADER structure within the ghost chunk to set a fake ProcessBilled.
 
@@ -41,11 +41,11 @@ This exploit was tested in the following environment:
    - Exploit HEVD's NonPagedPoolNx buffer overflow to corrupt an adjacent chunk's POOL_HEADER, creating a ghost chunk:
      - Set CacheAligned bit and manipulate PreviousSize to control chunk positioning.
      - Upon freeing, this creates a ghost chunk overlapping with a previous chunk.
-   - The ghost chunk's HEAP_VS_CHUNK_HEADER, POOL_HEADER, and PipeQueueEntry overlap with the previous chunk's data.
+   - The ghost chunk's HEAP_VS_CHUNK_HEADER, POOL_HEADER, and NP_DATA_QUEUE_ENTRY overlap with the previous chunk's data.
      - Reading from the previous chunk's PipeQueue leaks the ghost chunk's structures.
      - Writing to the previous chunk manipulates the ghost chunk's structures.
-   - Overwrite the ghost chunk with a fake PipeQueueEntry, pointing linkedIRP to a user-mode fake PipeQueueEntrySub.
-   - Set PipeQueryEntrySub's data_ptr to the desired read address.
+   - Overwrite the ghost chunk with a fake NP_DATA_QUEUE_ENTRY, pointing linkedIRP to a user-mode fake IRP.
+   - Set fake IRP's SystemBuffer to the desired read address.
    - Use PeekNamedPipe to trigger a read from the specified address.
 
 2. [Leak kernel information](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/620eeac/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/core/privilege_escalation.cpp#L77):

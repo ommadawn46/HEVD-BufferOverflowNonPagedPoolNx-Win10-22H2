@@ -6,6 +6,6 @@
 #define HEVD_DEVICE_NAME "\\\\.\\HackSysExtremeVulnerableDriver"
 
 HANDLE HevdOpenDeviceHandle(void);
-int HevdTriggerBufferOverflowNonPagedPoolNx(HANDLE hHevd, char* overflow_data);
+int HevdTriggerBufferOverflowNonPagedPoolNx(HANDLE hHevd, char* overflow_buf, size_t overflow_size);
 
 #endif // HEVD_H

