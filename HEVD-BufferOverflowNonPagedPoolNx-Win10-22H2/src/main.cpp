@@ -7,7 +7,7 @@
 int main()
 {
     puts("HEVD - BufferOverflowNonPagedPoolNx Exploit (Low Integrity)");
-    puts("Windows 10 Version 22H2 (OS Build 19045.5247)");
+    puts("Windows 10 Version 22H2 (OS Build 19045.5737)");
     puts("-----");
 
     puts("\n[*] Initializing Windows API functions...");

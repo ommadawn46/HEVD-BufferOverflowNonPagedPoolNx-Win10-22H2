@@ -26,7 +26,7 @@
 
 // Kernel function and variable offsets
 #define nt_PsInitialSystemProcess_OFFSET 0xCFC420
-#define nt_ExAllocatePoolWithTag_OFFSET 0x9B8010
+#define nt_ExAllocatePoolWithTag_OFFSET 0x9B5010
 #define nt_ExpPoolQuotaCookie_OFFSET 0xCFC9E8
 #define nt_RtlpHpHeapGlobals_OFFSET 0xC1DD40
 #define Npfs_imp_ExAllocatePoolWithTag_OFFSET 0x7050

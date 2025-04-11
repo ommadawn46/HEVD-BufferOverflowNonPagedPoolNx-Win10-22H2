@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This repository contains an exploit for the BufferOverflowNonPagedPoolNx vulnerability in [HackSys Extreme Vulnerable Driver (HEVD)](https://github.com/hacksysteam/HackSysExtremeVulnerableDriver). The exploit targets Windows 10 Version 22H2 ([OS Build 19045.5247](https://support.microsoft.com/en-us/topic/december-10-2024-kb5048652-os-builds-19044-5247-and-19045-5247-454fbd4c-0723-449e-915b-8515ab41f8e3)) and demonstrates a technique to achieve privilege escalation from a low-integrity process to SYSTEM.
+This repository contains an exploit for the BufferOverflowNonPagedPoolNx vulnerability in [HackSys Extreme Vulnerable Driver (HEVD)](https://github.com/hacksysteam/HackSysExtremeVulnerableDriver). The exploit targets Windows 10 Version 22H2 ([OS Build 19045.5737](https://support.microsoft.com/en-us/topic/april-8-2025-kb5055518-os-builds-19044-5737-and-19045-5737-6329246b-63bb-4d0a-9e95-e22926fbbe51)) and demonstrates a technique to achieve privilege escalation from a low-integrity process to SYSTEM.
 
 ## Exploit Overview
 
@@ -26,7 +26,7 @@ Key techniques:
 
 This exploit was tested in the following environment:
 
-- Windows 10 Version 22H2 (OS Build 19045.5247)
+- Windows 10 Version 22H2 (OS Build 19045.5737)
 - KVA Shadow: Enabled
 - VBS/HVCI: Disabled
 - Integrity Level: Low
