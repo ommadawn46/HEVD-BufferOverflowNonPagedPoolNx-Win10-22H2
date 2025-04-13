@@ -3,6 +3,7 @@
 #include "core/privilege_escalation.h"
 #include "core/cleanup.h"
 #include "windows_api/windows_api.h"
+#include "pe_utils/pe_utils.h"
 
 int main()
 {
@@ -14,6 +15,13 @@ int main()
     if (!InitializeWindowsApiWrappers())
     {
         fprintf(stderr, "[-] Failed to load required functions\n");
+        return 1;
+    }
+
+    puts("\n[*] Resolving kernel RVAs...");
+    if (!ResolveKernelRvas())
+    {
+        fprintf(stderr, "[-] Failed to resolve kernel RVAs\n");
         return 1;
     }
 

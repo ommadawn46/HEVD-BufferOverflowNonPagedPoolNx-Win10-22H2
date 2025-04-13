@@ -23,6 +23,7 @@
     <ClInclude Include="include\core\cleanup.h" />
     <ClInclude Include="include\core\privilege_escalation.h" />
     <ClInclude Include="include\hevd\hevd.h" />
+    <ClInclude Include="include\pe_utils\pe_utils.h" />
     <ClInclude Include="include\pipe_utils\pipe_utils.h" />
     <ClInclude Include="include\primitives\arbitrary_decrement.h" />
     <ClInclude Include="include\primitives\arbitrary_read.h" />
@@ -34,6 +35,7 @@
     <ClCompile Include="src\core\privilege_escalation.cpp" />
     <ClCompile Include="src\hevd\hevd.cpp" />
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\pe_utils\pe_utils.cpp" />
     <ClCompile Include="src\pipe_utils\pipe_utils.cpp" />
     <ClCompile Include="src\primitives\arbitrary_decrement.cpp" />
     <ClCompile Include="src\primitives\arbitrary_read.cpp" />

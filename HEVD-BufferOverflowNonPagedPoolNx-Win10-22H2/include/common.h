@@ -24,13 +24,6 @@
 // ref: https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_DRIVER_OBJECT
 #define DRIVER_OBJECT_DriverStart_OFFSET 0x18
 
-// Kernel function and variable offsets
-#define nt_PsInitialSystemProcess_OFFSET 0xCFC420
-#define nt_ExAllocatePoolWithTag_OFFSET 0x9B5010
-#define nt_ExpPoolQuotaCookie_OFFSET 0xCFC9E8
-#define nt_RtlpHpHeapGlobals_OFFSET 0xC1DD40
-#define Npfs_imp_ExAllocatePoolWithTag_OFFSET 0x7050
-
 // Npfs.sys structure offsets
 // ref: https://github.com/reactos/reactos/blob/c2c66af/drivers/filesystems/npfs/npfs.h#L258
 #define NP_CCB_FileObject_OFFSET 0x30

