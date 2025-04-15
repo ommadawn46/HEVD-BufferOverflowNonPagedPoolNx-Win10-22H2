@@ -2,119 +2,109 @@
 
 ## Introduction
 
-This repository contains an exploit for the BufferOverflowNonPagedPoolNx vulnerability in [HackSys Extreme Vulnerable Driver (HEVD)](https://github.com/hacksysteam/HackSysExtremeVulnerableDriver). The exploit targets Windows 10 Version 22H2 ([OS Build 19045.5737](https://support.microsoft.com/en-us/topic/april-8-2025-kb5055518-os-builds-19044-5737-and-19045-5737-6329246b-63bb-4d0a-9e95-e22926fbbe51)) and demonstrates a technique to achieve privilege escalation from a low-integrity process to SYSTEM.
+This repository contains an exploit for the BufferOverflowNonPagedPoolNx vulnerability in [HackSys Extreme Vulnerable Driver (HEVD)](https://github.com/hacksysteam/HackSysExtremeVulnerableDriver). The exploit targets Windows 10 Version 22H2 and demonstrates a technique to achieve privilege escalation from a low-integrity process to SYSTEM.
+
+This exploit uses runtime analysis of kernel modules to work across multiple Windows 10 22H2 builds.
 
 ## Exploit Overview
 
 The exploit leverages [the BufferOverflowNonPagedPoolNx vulnerability](https://github.com/hacksysteam/HackSysExtremeVulnerableDriver/blob/b02b6ea3/Driver/HEVD/Windows/BufferOverflowNonPagedPoolNx.c#L138) to create a ["ghost chunk"](https://www.sstic.org/media/SSTIC2020/SSTIC-actes/pool_overflow_exploitation_since_windows_10_19h1/SSTIC2020-Slides-pool_overflow_exploitation_since_windows_10_19h1-bayet_fariello.pdf#page=43) through [Aligned Chunk Confusion](https://github.com/synacktiv/Windows-kernel-SegmentHeap-Aligned-Chunk-Confusion) in the NonPagedPoolNx region. This ghost chunk is then manipulated to achieve arbitrary read and write primitives, which are subsequently used to elevate privileges.
 
-Key techniques:
+**Key techniques:**
 
-1. Creation of a ghost chunk using Aligned Chunk Confusion in NonPagedPoolNx, enabling leakage and manipulation of [HEAP_VS_CHUNK_HEADER](https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_HEAP_VS_CHUNK_HEADER), [POOL_HEADER](https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_POOL_HEADER), and [NP_DATA_QUEUE_ENTRY](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/7aeb8ed/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/include/common.h#L83) structures via the previous chunk.
+1. Dynamic discovery of kernel offsets by analyzing PE binary formats of system modules (ntoskrnl.exe and npfs.sys), providing compatibility across multiple Windows builds without requiring version-specific memory offsets.
 
-2. Establishment of an arbitrary read primitive by manipulating the NP_DATA_QUEUE_ENTRY structure within the ghost chunk to set up a fake [IRP](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/7aeb8ed/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/include/common.h#L97).
+2. Creation of a ghost chunk using Aligned Chunk Confusion in NonPagedPoolNx, enabling leakage and manipulation of [HEAP_VS_CHUNK_HEADER](https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_HEAP_VS_CHUNK_HEADER), [POOL_HEADER](https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_POOL_HEADER), and [NP_DATA_QUEUE_ENTRY](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/7aeb8ed/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/include/common.h#L83) structures via the previous chunk.
 
-3. Establishment of an arbitrary decrement primitive by altering the POOL_HEADER structure within the ghost chunk to set a fake ProcessBilled.
+3. Establishment of an arbitrary read primitive by manipulating the NP_DATA_QUEUE_ENTRY structure within the ghost chunk to set up a fake [IRP](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/7aeb8ed/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/include/common.h#L97).
 
-4. Establishment of an arbitrary write primitive by zeroing the [PreviousMode](https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/previousmode) in the current thread's [KTHREAD](https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_KTHREAD) structure.
+4. Bypass KASLR by leaking an initial kernel address from NP_DATA_QUEUE_ENTRY.QueueEntry.Flink. This leaked address allows traversing linked kernel structures to determine the kernel base address.
 
-5. Elevation to SYSTEM privileges by modifying the Token in the current process's [EPROCESS](https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_EPROCESS) structure.
+5. Establishment of an arbitrary decrement primitive by altering the POOL_HEADER structure within the ghost chunk to set a fake ProcessBilled.
 
-6. Stabilization of the system and avoidance of BSoD by manipulating the HEAP_VS_CHUNK_HEADER structures of the ghost chunk and its linked chunks to prevent detection of the corrupted chunk.
+6. Establishment of an arbitrary write primitive by zeroing the [PreviousMode](https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/previousmode) in the current thread's [KTHREAD](https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_KTHREAD) structure.
+
+7. Elevation to SYSTEM privileges by modifying the Token in the current process's [EPROCESS](https://www.vergiliusproject.com/kernels/x64/windows-10/22h2/_EPROCESS) structure.
+
+8. Stabilization of the system and avoidance of BSoD by manipulating the HEAP_VS_CHUNK_HEADER structures of the ghost chunk and its linked chunks to prevent detection of the corrupted chunk.
+
+### Exploit Execution Flow
+
+```mermaid
+flowchart TD
+    classDef primitiveStyle fill:#fcf8e3,stroke:#8a6d3b,stroke-width:2px,font-weight:bold,color:#000000
+
+    start(["Run Exploit"]) ==> phase0
+    phase0 ==> phase1
+    phase1 ==> phase2
+    phase2 ==> phase3
+    phase3 ==> phase4
+    phase4 ==> phase5
+    phase5 ==> finish(["SYSTEM Shell Spawns"])
+
+    subgraph phase0["Phase 0: Initialization"]
+        direction LR
+        init["Initialize Windows API"] --> rva["Resolve Kernel Addresses"]
+    end
+
+    subgraph phase1["Phase 1: Arbitrary Read Setup"]
+        direction LR
+        heap_spray["Spray Heap (Pipes)"] --> vuln["Trigger Buffer Overflow"] --> cachealign["Set CacheAligned Flag"] --> ghost["Create Ghost Chunk"] --> read["Establish Read Primitive"]
+    end
+
+    subgraph phase2["Phase 2: KASLR Bypass"]
+        direction LR
+        leak1["Leak NP_DATA_QUEUE_ENTRY.Flink"] --> traverse["Traverse Kernel Objects"] --> kernelbase["Calculate Kernel Base"]
+    end
+
+    subgraph phase3["Phase 3: Arbitrary Write Setup"]
+        direction LR
+        fakeeproc["Create Fake EPROCESS"] --> decrement["Establish Decrement Primitive"]
+        decrement -. "Used to set" .-> prevmode["Set PreviousMode to 0"]
+        prevmode --> write["Gain Arbitrary Write"]
+    end
+
+    subgraph phase4["Phase 4: Token Stealing"]
+        direction LR
+        sysprocess["Locate System Process"] --> systoken["Read System Token"] --> copytoken["Copy Token to Current Process"]
+    end
+
+    subgraph phase5["Phase 5: Cleanup"]
+        direction LR
+        fixheaders["Fix VS Chunk Headers"] --> restoreprevmode["Restore PreviousMode to 1"] --> cleanupPipes["Cleanup Pipes"]
+    end
+
+    class read,decrement,write primitiveStyle
+
+    read -. "Used in" .-> traverse
+    read -. "Used in" .-> systoken
+    write -. "Used in" .-> copytoken
+    write -. "Used in" .-> fixheaders
+    write -. "Used in" .-> restoreprevmode
+```
 
 ## Tested Environment
 
-This exploit was tested in the following environment:
+This exploit was tested in the following environments:
 
-- Windows 10 Version 22H2 (OS Build 19045.5737)
+- Windows 10 Version 22H2
+  - OS Build 19045.5737
+  - OS Build 19045.5247
+  - OS Build 19045.4651
+  - OS Build 19045.3930
 - KVA Shadow: Enabled
 - VBS/HVCI: Disabled
 - Integrity Level: Low
+
+> **Note:** Due to the exploit's dynamic PE analysis approach, it may work on additional Windows 10 Version 22H2 builds beyond those explicitly tested.
 
 ## Demo
 
 ![Exploit Demo](img/demo.gif)
 
-## Detailed Exploit Steps
+## How to Run
 
-1. [Establish arbitrary read primitive](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/7aeb8ed/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/primitives/arbitrary_read.cpp#L182):
-   - Exploit HEVD's NonPagedPoolNx buffer overflow to corrupt an adjacent chunk's POOL_HEADER, creating a ghost chunk:
-     - Set CacheAligned bit and manipulate PreviousSize to control chunk positioning.
-     - Upon freeing, this creates a ghost chunk overlapping with a previous chunk.
-   - The ghost chunk's HEAP_VS_CHUNK_HEADER, POOL_HEADER, and NP_DATA_QUEUE_ENTRY overlap with the previous chunk's data.
-     - Reading from the previous chunk's PipeQueue leaks the ghost chunk's structures.
-     - Writing to the previous chunk manipulates the ghost chunk's structures.
-   - Overwrite the ghost chunk with a fake NP_DATA_QUEUE_ENTRY, pointing linkedIRP to a user-mode fake IRP.
-   - Set fake IRP's SystemBuffer to the desired read address.
-   - Use PeekNamedPipe to trigger a read from the specified address.
-
-2. [Leak kernel information](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/7aeb8ed/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/core/privilege_escalation.cpp#L76):
-   - Use the arbitrary read primitive to obtain kernel base address, ExpPoolQuotaCookie, RtlpHpHeapGlobals, and other critical addresses.
-   - Find the EPROCESS and KTHREAD structures of the current process.
-
-3. [Establish arbitrary decrement primitive](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/7aeb8ed/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/primitives/arbitrary_decrement.cpp#L75):
-   - Create a fake EPROCESS structure in NonPagedPoolNx by writing data to the pipe associated with the previous chunk.
-   - Modify the ghost chunk's POOL_HEADER by reallocating the previous chunk:
-     - Set the PoolQuota bit to make the kernel interpret part of the header as a ProcessBilled pointer.
-     - Configure a fake ProcessBilled pointer using the formula:
-       `ProcessBilled = fake EPROCESS address ⊕ Ghost Chunk address ⊕ ExpPoolQuotaCookie`
-     - Set up the fake EPROCESS structure with its PoolQuotaBlock pointing to (target address - 1).
-     - Set the BlockSize to 0x100 bytes.
-   - Trigger the freeing of the ghost chunk, causing the kernel to:
-     - Subtract 0x100 (BlockSize) from the PoolQuota at (target address - 1).
-     - This results in a decrement of 0x1 at the target address.
-
-4. [Establish arbitrary write primitive](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/7aeb8ed/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/primitives/arbitrary_write.cpp#L12):
-   - Use the arbitrary decrement primitive to manipulate the PreviousMode field of the current thread's KTHREAD structure.
-     - Decrement PreviousMode from 1 (UserMode) to 0 (KernelMode).
-   - This manipulation bypasses address validation in native system service routines like NtWriteVirtualMemory:
-     - Normally, these routines perform checks to prevent writing to kernel space addresses when called from user mode.
-     - With PreviousMode set to KernelMode, these checks are skipped.
-   - As a result, the exploit gains the ability to write to arbitrary kernel memory addresses, establishing an arbitrary write primitive.
-
-5. [Elevate privileges (data-only attack)](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/7aeb8ed/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/core/privilege_escalation.cpp#L150):
-   - Use the arbitrary read primitive to locate the System process EPROCESS structure.
-   - Use the arbitrary write primitive to copy the System process token to the current process's token.
-
-6. [Restore kernel state](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/7aeb8ed/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/core/cleanup.cpp):
-   - Repair the HEAP_VS_CHUNK_HEADER structures of the ghost chunk and adjacent chunks:
-     - Use RtlpHpHeapGlobals (previously leaked) to decode and re-encode headers
-       - `decodedVsHeader = encodedVsHeader ⊕ addrof(encodedVsHeader) ⊕ RtlpHpHeapGlobals`
-     - Update UnsafeSize and UnsafePrevSize to restore proper chunk linkage
-     - These repairs prevent detection of the corrupted heap structure, avoiding [KERNEL MODE HEAP CORRUPTION](https://learn.microsoft.com/windows-hardware/drivers/debugger/bug-check-0x13a--kernel-mode-heap-corruption) and subsequent BSoD
-   - Restore PreviousMode to its original value of 1 (UserMode)
-   - Clean up the pipes used in the exploit
-
-## Build
-
-To build the project:
-
-1. Open the solution file `HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2.sln` in Visual Studio 2022.
-2. Build the solution (F7 or Build > Build Solution).
-
-## Usage
-
-**Note:** Steps for installing the HEVD driver can be found in the [Installing the HEVD Driver](#installing-the-hevd-driver) section.
-
-1. Load the HEVD driver on the target system. (If it is not already loaded).
-
-2. Start a Low Integrity command prompt:
-   ```
-   copy %systemroot%\system32\cmd.exe .\cmd-low-integrity.exe
-   icacls .\cmd-low-integrity.exe /setintegritylevel low
-   .\cmd-low-integrity.exe
-   ```
-   Verify the integrity level:
-   ```
-   whoami /groups | find "Mandatory Label"
-   ```
-   This should show "Mandatory Label\Low Mandatory Level".
-
-3. From the Low Integrity command prompt, run the compiled exploit.
-
-4. If successful, a SYSTEM shell should spawn.
-
-## Installing the HEVD Driver
+### Step 1: Install HEVD Driver
 
 1. Download and extract [the precompiled driver](https://github.com/hacksysteam/HackSysExtremeVulnerableDriver/releases):
 
@@ -144,7 +134,41 @@ To build the project:
    sc start HEVD
    ```
 
-## Setting Up the Debugger (Host System)
+### Step 2: Build the Exploit
+
+To build the project:
+
+1. Open the solution file `HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2.sln` in Visual Studio 2022.
+2. Build the solution (F7 or Build > Build Solution).
+
+### Step 3: Prepare Low Integrity Environment
+
+1. Start a Low Integrity command prompt:
+   ```
+   copy %systemroot%\system32\cmd.exe .\cmd-low-integrity.exe
+   icacls .\cmd-low-integrity.exe /setintegritylevel low
+   .\cmd-low-integrity.exe
+   ```
+
+2. Verify the integrity level:
+   ```
+   whoami /groups | find "Mandatory Label"
+   ```
+   This should show "Mandatory Label\Low Mandatory Level".
+
+### Step 4: Run the Exploit
+
+- From the Low Integrity command prompt, run the compiled exploit.
+
+   ```
+   .\HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2.exe
+   ```
+
+- If successful, a SYSTEM shell should spawn.
+
+### (Optional) Step 5: Setup Kernel Debugging
+
+#### Host Setup (Debugger)
 
 1. Install WinDbg from the Microsoft Store:
    - [WinDbg (Microsoft Store)](https://apps.microsoft.com/detail/9pgjgd53tn86)
@@ -154,7 +178,7 @@ To build the project:
    - Enter a **port number** and a **unique key** of your choice. You will later specify the same `<PORT>` and `<KEY>` on the target system using `bcdedit /dbgsettings`.
    - Click **OK** to start listening for the debuggee's connection.
 
-## Enabling Kernel Debugging (Target System)
+#### Target Setup (Debuggee)
 
 Use the following commands on the target system, replacing:
 
@@ -169,6 +193,84 @@ shutdown /r /t 0
 ```
 
 Once the target system reboots, it will attempt to connect to the debugger over the network.
+
+## Detailed Exploit Steps
+
+1. **Dynamic discovery of kernel addresses** - [ResolveKernelRvas() in `pe_utils.cpp`](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/main/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/pe_utils/pe_utils.cpp)
+   - The exploit analyzes PE headers of kernel modules (ntoskrnl.exe and npfs.sys) to calculate offsets.
+   - It resolves critical RVAs (Relative Virtual Addresses) for kernel functions and variables.
+   - The exploit loads modules locally using LoadLibraryExA with DONT_RESOLVE_DLL_REFERENCES flag.
+   - It parses PE headers to locate exported functions (ExAllocatePoolWithTag), global variables (PsInitialSystemProcess), and imports.
+   - This approach provides compatibility across different Windows builds without hardcoded offsets.
+
+2. **Create a ghost chunk** - [SetupArbitraryRead() in `arbitrary_read.cpp`](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/main/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/primitives/arbitrary_read.cpp)
+   - Create holes in the NonPagedPoolNx by allocating and selectively freeing pipe buffers.
+   - Spray the heap with pipes to create a predictable layout before triggering the vulnerability.
+   - Enable the dynamic lookaside list for the ghost chunk size.
+     - When the corrupted chunk is freed and placed onto the lookaside list, this defers its processing by the Variable Size (VS) heap backend's main free path (e.g., coalescing checks).
+     - This delay mechanism is employed to prevent immediate detection of the heap corruption and avoid a crash (BSOD).
+   - Trigger HEVD's buffer overflow to corrupt an adjacent chunk's POOL_HEADER:
+     - Set CacheAligned bit (0x4) and manipulate PreviousSize to control chunk positioning.
+   - Upon freeing and reallocating, this creates a ghost chunk overlapping with a previous chunk.
+   - The ghost chunk's HEAP_VS_CHUNK_HEADER, POOL_HEADER, and NP_DATA_QUEUE_ENTRY overlap with the previous chunk's data.
+
+3. **Establish arbitrary read primitive** - [ArbitraryRead() in `arbitrary_read.cpp`](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/main/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/primitives/arbitrary_read.cpp)
+   - Create a user-mode fake IRP structure with a controllable SystemBuffer field.
+   - Write to the previous chunk to overwrite the ghost chunk's NP_DATA_QUEUE_ENTRY.
+   - Point the Irp field of NP_DATA_QUEUE_ENTRY to the user-mode fake IRP
+   - Set NP_DATA_QUEUE_ENTRY.DataEntryType to 0x1 (Unbuffered).
+     - With DataEntryType=1 (Unbuffered), the kernel reads from the address pointed to by IRP->SystemBuffer.
+     - In contrast, DataEntryType=0 (Buffered) would make the kernel read from NP_DATA_QUEUE_ENTRY's data array.
+   - Set fake IRP's SystemBuffer to the desired read address.
+   - Use PeekNamedPipe to trigger a read from the specified kernel memory address.
+   - Reading from the previous chunk's PipeQueue leaks data from the target address.
+
+4. **KASLR bypass & Leak kernel information** - [leakKernelInfo() in `privilege_escalation.cpp`](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/main/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/core/privilege_escalation.cpp)
+   - Use arbitrary read to leak NP_DATA_QUEUE_ENTRY.QueueEntry.Flink pointer, which points to NP_CCB_DataQueue.
+   - This first kernel-mode address leak is the critical step that defeats KASLR.
+   - Traverse the object chain using the arbitrary read primitive:
+      - NP_CCB_DataQueue -> FILE_OBJECT
+      - FILE_OBJECT -> DEVICE_OBJECT
+      - DEVICE_OBJECT -> DRIVER_OBJECT
+      - DRIVER_OBJECT -> npfs.sys base address
+   - Read ExAllocatePoolWithTag address from npfs.sys's import table.
+   - Calculate ntoskrnl.exe base address by subtracting the RVA of ExAllocatePoolWithTag.
+   - Using the arbitrary read primitive, obtain additional critical addresses:
+     - ExpPoolQuotaCookie, RtlpHpHeapGlobals, PsInitialSystemProcess.
+     - Locate current process EPROCESS and KTHREAD structures.
+
+5. **Establish arbitrary decrement primitive** - [SetupArbitraryDecrement() in `arbitrary_decrement.cpp`](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/main/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/primitives/arbitrary_decrement.cpp)
+   - Create a fake EPROCESS structure in NonPagedPoolNx by writing data to the pipe associated with the previous chunk.
+   - Modify the ghost chunk's POOL_HEADER by reallocating the previous chunk:
+     - Set the PoolQuota bit to make the kernel interpret part of the header as a ProcessBilled pointer.
+     - Configure a fake ProcessBilled pointer using the formula:
+       `ProcessBilled = fake EPROCESS address ⊕ Ghost Chunk address ⊕ ExpPoolQuotaCookie`
+     - Set up the fake EPROCESS structure with its PoolQuotaBlock pointing to (target address - 1).
+     - Set the BlockSize to 0x100 bytes.
+   - Trigger the freeing of the ghost chunk, causing the kernel to:
+     - Subtract 0x100 (BlockSize) from the PoolQuota at (target address - 1).
+     - This results in a decrement of 0x1 at the target address.
+
+6. **Establish arbitrary write primitive** - [SetupArbitraryWrite() in `arbitrary_write.cpp`](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/main/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/primitives/arbitrary_write.cpp)
+   - Use the arbitrary decrement primitive to manipulate the PreviousMode field of the current thread's KTHREAD structure.
+     - Decrement PreviousMode from 1 (UserMode) to 0 (KernelMode).
+   - This manipulation bypasses address validation in native system service routines like NtWriteVirtualMemory:
+     - Normally, these routines perform checks to prevent writing to kernel space addresses when called from user mode.
+     - With PreviousMode set to KernelMode, these checks are skipped.
+   - As a result, the exploit gains the ability to write to arbitrary kernel memory addresses, establishing an arbitrary write primitive.
+
+7. **Elevate privileges (data-only attack)** - [EscalatePrivileges() in `privilege_escalation.cpp`](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/main/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/core/privilege_escalation.cpp)
+   - Use the arbitrary read primitive to locate the System process EPROCESS structure.
+   - Use the arbitrary write primitive to copy the System process token to the current process's token.
+
+8. **Restore kernel state** - [FixVsChunkHeaders(), RestorePreviousMode() and CleanupPipes() in `cleanup.cpp`](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/main/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/core/cleanup.cpp)
+   - Repair the HEAP_VS_CHUNK_HEADER structures of the ghost chunk and adjacent chunks:
+     - Use RtlpHpHeapGlobals (previously leaked) to decode and re-encode headers:
+       - `decodedVsHeader = encodedVsHeader ⊕ addrof(encodedVsHeader) ⊕ RtlpHpHeapGlobals`
+     - Update UnsafeSize and UnsafePrevSize to restore proper chunk linkage.
+     - These repairs prevent detection of the corrupted heap structure, avoiding [KERNEL MODE HEAP CORRUPTION](https://learn.microsoft.com/windows-hardware/drivers/debugger/bug-check-0x13a--kernel-mode-heap-corruption) and subsequent BSoD.
+   - Restore PreviousMode to its original value of 1 (UserMode).
+   - Clean up the pipes used in the exploit.
 
 ## Disclaimer
 
