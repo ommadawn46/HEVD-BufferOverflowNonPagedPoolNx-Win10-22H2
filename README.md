@@ -32,7 +32,10 @@ The exploit leverages [the BufferOverflowNonPagedPoolNx vulnerability](https://g
 
 ```mermaid
 flowchart TD
-    classDef primitiveStyle fill:#fcf8e3,stroke:#8a6d3b,stroke-width:2px,font-weight:bold,color:#000000
+    classDef primitiveStyle fill:#fcf8e3,stroke:#8a6d3b,stroke-width:2px,font-weight:bold,color:#000
+    classDef vulnStyle      fill:#ffdddd,stroke:#ff0000,stroke-width:2px,font-weight:bold,color:#000
+    classDef coreLeakStyle  fill:#e3f0ff,stroke:#1e90ff,stroke-width:2px,font-weight:bold,color:#000
+    classDef goalStyle      fill:#d4edda,stroke:#28a745,stroke-width:2px,font-weight:bold,color:#000
 
     start(["Run Exploit"]) ==> phase0
     phase0 ==> phase1
@@ -40,47 +43,57 @@ flowchart TD
     phase2 ==> phase3
     phase3 ==> phase4
     phase4 ==> phase5
-    phase5 ==> finish(["SYSTEM Shell Spawns"])
+    phase5 ==> finish(["Spawn SYSTEM Shell"])
 
     subgraph phase0["Phase 0: Initialization"]
         direction LR
-        init["Initialize Windows API"] --> rva["Resolve Kernel Addresses"]
+        init["Initialize Windows API Wrappers"] --> rva["Resolve Required Kernel RVAs"]
     end
 
-    subgraph phase1["Phase 1: Arbitrary Read Setup"]
+    subgraph phase1["Phase 1: Arbitrary Read"]
         direction LR
-        heap_spray["Spray Heap (Pipes)"] --> vuln["Trigger Buffer Overflow"] --> cachealign["Set CacheAligned Flag"] --> ghost["Create Ghost Chunk"] --> read["Establish Read Primitive"]
+        heap["Spray Heap (Named Pipes)"] --> vuln["Trigger HEVD Buffer Overflow"] --> cache["Set CacheAligned Flag"] --> ghost["Create Ghost Chunk"] --> read["Establish Arbitrary Read Primitive"]
     end
 
     subgraph phase2["Phase 2: KASLR Bypass"]
         direction LR
-        leak1["Leak NP_DATA_QUEUE_ENTRY.Flink"] --> traverse["Traverse Kernel Objects"] --> kernelbase["Calculate Kernel Base"]
+        leak1["Leak NP_DATA_QUEUE_ENTRY.Flink"] --> traverse["Walk Kernel Object Chain"] --> kbase["Leak Kernel Base & Globals"]
     end
 
-    subgraph phase3["Phase 3: Arbitrary Write Setup"]
+    subgraph phase3["Phase 3: Arbitrary Write"]
         direction LR
-        fakeeproc["Create Fake EPROCESS"] --> decrement["Establish Decrement Primitive"]
-        decrement -. "Used to set" .-> prevmode["Set PreviousMode to 0"]
-        prevmode --> write["Gain Arbitrary Write"]
+        fakeeproc["Forge Fake EPROCESS"] --> dec["Create Arbitrary Decrement Primitive"]
+        dec -. "Sets PreviousMode" .-> prevmode["Overwrite PreviousMode = 0"]
+        prevmode --> write["Gain Arbitrary Write Primitive"]
     end
 
     subgraph phase4["Phase 4: Token Stealing"]
         direction LR
-        sysprocess["Locate System Process"] --> systoken["Read System Token"] --> copytoken["Copy Token to Current Process"]
+        systoken["Read SYSTEM Process Token"] --> copytoken["Overwrite Current Process Token with SYSTEM Token"]
     end
 
     subgraph phase5["Phase 5: Cleanup"]
         direction LR
-        fixheaders["Fix VS Chunk Headers"] --> restoreprevmode["Restore PreviousMode to 1"] --> cleanupPipes["Cleanup Pipes"]
+        fixhdr["Repair VS Chunk Headers"] --> restoreprevmode["Restore PreviousMode = 1"] --> cleanpipes["Close & Free Pipes"]
     end
 
-    class read,decrement,write primitiveStyle
+    class read,dec,write primitiveStyle
+    class vuln vulnStyle
+    class kbase coreLeakStyle
+    class copytoken goalStyle
 
-    read -. "Used in" .-> traverse
-    read -. "Used in" .-> systoken
-    write -. "Used in" .-> copytoken
-    write -. "Used in" .-> fixheaders
-    write -. "Used in" .-> restoreprevmode
+    read  -. "Used for traversal"  .-> traverse
+    read  -. "Used for token read" .-> systoken
+    write -. "Writes TOKEN field"  .-> copytoken
+    write -. "Writes VS chunk headers" .-> fixhdr
+    write -. "Writes KTHREAD flag" .-> restoreprevmode
+
+    kbase -. "RtlpHpHeapGlobals"  .-> fakeeproc
+    kbase -. "ExpPoolQuotaCookie" .-> dec
+    kbase -. "RtlpHpHeapGlobals"  .-> fixhdr
+    kbase -. "PsInitialSystemProcess" .-> systoken
+
+    copytoken -. "Privilege Escalation" .-> finish
 ```
 
 ## Tested Environment
