@@ -239,10 +239,10 @@ Once the target system reboots, it will attempt to connect to the debugger over 
    - Reading from the previous chunk's PipeQueue leaks data from the target address.
 
 4. **KASLR bypass & Leak kernel information** - [leakKernelInfo() in `privilege_escalation.cpp`](https://github.com/ommadawn46/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/blob/main/HEVD-BufferOverflowNonPagedPoolNx-Win10-22H2/src/core/privilege_escalation.cpp)
-   - Use arbitrary read to leak NP_DATA_QUEUE_ENTRY.QueueEntry.Flink pointer, which points to NP_CCB_DataQueue.
+   - Use arbitrary read to leak NP_DATA_QUEUE_ENTRY.QueueEntry.Flink pointer, which points to NP_CCB.DataQueue.
    - This first kernel-mode address leak is the critical step that defeats KASLR.
    - Traverse the object chain using the arbitrary read primitive:
-      - NP_CCB_DataQueue -> FILE_OBJECT
+      - NP_CCB.FileObject -> FILE_OBJECT
       - FILE_OBJECT -> DEVICE_OBJECT
       - DEVICE_OBJECT -> DRIVER_OBJECT
       - DRIVER_OBJECT -> npfs.sys base address
